@@ -1,0 +1,395 @@
+{
+  "total_raw_rows": 1011079,
+  "clean_dkt_rows": 432928,
+  "unique_students": 6997,
+  "unique_skills": 239,
+  "overall_accuracy": 0.6307422943306971,
+  "schema_audit": [
+    {
+      "index": 1,
+      "column": "order_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 1011079,
+      "description": "Monotonically increasing transaction order ID (temporal sequence key)"
+    },
+    {
+      "index": 2,
+      "column": "assignment_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 6163,
+      "description": "Identifier for assigned homework, quiz, or class assignment"
+    },
+    {
+      "index": 3,
+      "column": "user_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 8519,
+      "description": "Unique student learner identifier"
+    },
+    {
+      "index": 4,
+      "column": "assistment_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 22039,
+      "description": "Parent learning module / problem container identifier"
+    },
+    {
+      "index": 5,
+      "column": "problem_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 35978,
+      "description": "Specific problem / exercise question identifier"
+    },
+    {
+      "index": 6,
+      "column": "original",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 2,
+      "description": "Problem type indicator (1 = main problem, 0 = scaffolding sub-question)"
+    },
+    {
+      "index": 7,
+      "column": "correct",
+      "dtype": "float64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 10,
+      "description": "First-attempt correctness (1 = correct, 0 = incorrect; contains fractional credit)"
+    },
+    {
+      "index": 8,
+      "column": "attempt_count",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 270,
+      "description": "Number of attempts made on this problem (can be 0 if hint taken first)"
+    },
+    {
+      "index": 9,
+      "column": "ms_first_response_time",
+      "dtype": "float64",
+      "null_count": 125,
+      "null_pct": 0.012,
+      "unique_count": 155586,
+      "description": "Latency in milliseconds before the first submission/action"
+    },
+    {
+      "index": 10,
+      "column": "tutor_mode",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 5,
+      "description": "Interface mode during attempt (tutor, test, pre, post, survey)"
+    },
+    {
+      "index": 11,
+      "column": "answer_type",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 7,
+      "description": "Input widget type (algebra, choose_1, fill_in_1, choose_n, open_response, rank, external)"
+    },
+    {
+      "index": 12,
+      "column": "sequence_id",
+      "dtype": "float64",
+      "null_count": 11006,
+      "null_pct": 1.089,
+      "unique_count": 1551,
+      "description": "Curriculum curriculum unit or sequence identifier"
+    },
+    {
+      "index": 13,
+      "column": "student_class_id",
+      "dtype": "float64",
+      "null_count": 11006,
+      "null_pct": 1.089,
+      "unique_count": 434,
+      "description": "School classroom section identifier"
+    },
+    {
+      "index": 14,
+      "column": "position",
+      "dtype": "float64",
+      "null_count": 11006,
+      "null_pct": 1.089,
+      "unique_count": 297,
+      "description": "Ordinal index of problem inside the assignment sequence"
+    },
+    {
+      "index": 15,
+      "column": "problem_set_type",
+      "dtype": "object",
+      "null_count": 11006,
+      "null_pct": 1.089,
+      "unique_count": 3,
+      "description": "Pedagogical delivery rule (MasterySection, Linear, etc.)"
+    },
+    {
+      "index": 16,
+      "column": "base_sequence_id",
+      "dtype": "float64",
+      "null_count": 11006,
+      "null_pct": 1.089,
+      "unique_count": 1127,
+      "description": "Root / template curriculum sequence identifier"
+    },
+    {
+      "index": 17,
+      "column": "list_skill_ids",
+      "dtype": "object",
+      "null_count": 577989,
+      "null_pct": 57.166,
+      "unique_count": 347,
+      "description": "Semicolon-delimited skill/concept identifiers mapped to this problem"
+    },
+    {
+      "index": 18,
+      "column": "list_skills",
+      "dtype": "object",
+      "null_count": 577989,
+      "null_pct": 57.166,
+      "unique_count": 337,
+      "description": "Human-readable skill names corresponding to list_skill_ids"
+    },
+    {
+      "index": 19,
+      "column": "teacher_id",
+      "dtype": "float64",
+      "null_count": 11006,
+      "null_pct": 1.089,
+      "unique_count": 241,
+      "description": "Educator / teacher account identifier"
+    },
+    {
+      "index": 20,
+      "column": "school_id",
+      "dtype": "float64",
+      "null_count": 28919,
+      "null_pct": 2.86,
+      "unique_count": 108,
+      "description": "Educational institution / school identifier"
+    }
+  ],
+  "hygiene_audit": {
+    "non_binary_correct_count": 766,
+    "non_binary_correct_breakdown": {
+      "0.75": 289,
+      "0.5": 206,
+      "0.25": 163,
+      "0.875": 71,
+      "0.625": 28,
+      "0.375": 7,
+      "0.125": 1,
+      "0.85": 1
+    },
+    "response_time_negative_count": 15,
+    "response_time_zero_count": 155,
+    "response_time_over_1hr_count": 400,
+    "response_time_over_24hr_count": 4,
+    "response_time_max_days": 3.9760395486111113,
+    "attempt_count_zero": 21788,
+    "attempt_count_over_10": 5348,
+    "attempt_count_max": 3824,
+    "scaffolding_missing_skills": 187407,
+    "scaffolding_total": 208759,
+    "original_missing_skills": 390582,
+    "original_total": 802320,
+    "multi_skill_rows": 76804,
+    "max_skills_per_item": 6,
+    "duplicate_user_problem_encounters": 54294,
+    "is_order_monotonic": true
+  },
+  "sequence_length": {
+    "min": 1,
+    "q25": 9.0,
+    "median": 25.0,
+    "mean": 61.87337430327283,
+    "q75": 65.0,
+    "q90": 146.40000000000055,
+    "max": 899
+  },
+  "response_time_sec": {
+    "median": 20.904,
+    "mean": 38.12759374098272,
+    "q25": 9.391,
+    "q75": 47.457
+  },
+  "top_frequent_skills": [
+    {
+      "skill_id": "277",
+      "skill_name": "Addition and Subtraction Integers",
+      "count": 24498,
+      "accuracy": 0.6535227365499224
+    },
+    {
+      "skill_id": "47",
+      "skill_name": "Conversion of Fraction Decimals Percents",
+      "count": 24059,
+      "accuracy": 0.6222619393989776
+    },
+    {
+      "skill_id": "79",
+      "skill_name": "Proportion",
+      "count": 22117,
+      "accuracy": 0.5906316408192793
+    },
+    {
+      "skill_id": "280",
+      "skill_name": "Addition and Subtraction Fractions",
+      "count": 16359,
+      "accuracy": 0.6683782627299957
+    },
+    {
+      "skill_id": "279",
+      "skill_name": "Multiplication and Division Integers",
+      "count": 13363,
+      "accuracy": 0.8350669759784479
+    },
+    {
+      "skill_id": "77",
+      "skill_name": "Finding Percents",
+      "count": 13044,
+      "accuracy": 0.5367985280588776
+    },
+    {
+      "skill_id": "2",
+      "skill_name": "Circle Graph",
+      "count": 10449,
+      "accuracy": 0.45525887644750695
+    },
+    {
+      "skill_id": "16",
+      "skill_name": "Counting Methods",
+      "count": 9669,
+      "accuracy": 0.4476160926672872
+    },
+    {
+      "skill_id": "27",
+      "skill_name": "Pythagorean Theorem",
+      "count": 9201,
+      "accuracy": 0.6269970655363547
+    },
+    {
+      "skill_id": "50",
+      "skill_name": "Ordering Fractions",
+      "count": 8480,
+      "accuracy": 0.7669811320754717
+    }
+  ],
+  "hardest_skills": [
+    {
+      "skill_id": "203",
+      "skill_name": "Percent Discount",
+      "count": 171,
+      "accuracy": 0.22807017543859648
+    },
+    {
+      "skill_id": "34",
+      "skill_name": "Multiplication Fractions",
+      "count": 165,
+      "accuracy": 0.24848484848484848
+    },
+    {
+      "skill_id": "16",
+      "skill_name": "Addition Whole Numbers",
+      "count": 185,
+      "accuracy": 0.2756756756756757
+    },
+    {
+      "skill_id": "74",
+      "skill_name": "Multiplication and Division Positive Decimals",
+      "count": 209,
+      "accuracy": 0.28708133971291866
+    },
+    {
+      "skill_id": "315",
+      "skill_name": "Parallel and Perpendicular Lines",
+      "count": 594,
+      "accuracy": 0.30976430976430974
+    },
+    {
+      "skill_id": "95",
+      "skill_name": "Composition of functions",
+      "count": 243,
+      "accuracy": 0.31275720164609055
+    },
+    {
+      "skill_id": "212",
+      "skill_name": "Proportion",
+      "count": 214,
+      "accuracy": 0.3364485981308411
+    },
+    {
+      "skill_id": "64",
+      "skill_name": "Fraction Of",
+      "count": 216,
+      "accuracy": 0.33796296296296297
+    }
+  ],
+  "easiest_skills": [
+    {
+      "skill_id": "288",
+      "skill_name": "Properties and Classification Rectangular Prisms",
+      "count": 829,
+      "accuracy": 0.9300361881785284
+    },
+    {
+      "skill_id": "10",
+      "skill_name": "Mode",
+      "count": 1219,
+      "accuracy": 0.9212469237079574
+    },
+    {
+      "skill_id": "277",
+      "skill_name": "Addition and Subtraction Fractions",
+      "count": 158,
+      "accuracy": 0.8481012658227848
+    },
+    {
+      "skill_id": "10",
+      "skill_name": "Ordering Integers",
+      "count": 325,
+      "accuracy": 0.8461538461538461
+    },
+    {
+      "skill_id": "10",
+      "skill_name": "Fraction Of",
+      "count": 756,
+      "accuracy": 0.83994708994709
+    },
+    {
+      "skill_id": "279",
+      "skill_name": "Multiplication and Division Integers",
+      "count": 13363,
+      "accuracy": 0.8350669759784479
+    },
+    {
+      "skill_id": "198",
+      "skill_name": "Median",
+      "count": 123,
+      "accuracy": 0.8292682926829268
+    },
+    {
+      "skill_id": "309",
+      "skill_name": "Order of Operations +-/* () positive reals",
+      "count": 180,
+      "accuracy": 0.8277777777777777
+    }
+  ]
+}

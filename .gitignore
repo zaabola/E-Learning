@@ -1,0 +1,34 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# logs / scratch
+*.log
+*.bak
+.t*.png
+.test-*.png
+
+# deploy
+.vercel
+
+# python / ml
+.venv/
+__pycache__/
+
+# Raw third-party asset folders (Pokemon Void / FireRed sheets) — unknown
+# redistribution license and not used at runtime; extracted game art lives in assets/
+Audio/
+Graphics/
+PBS/
+GLCache/
+Fonts/
+NewAssets/
+
+# Large datasets (> GitHub 100 MB limit) — re-download via the dataset scripts
+Models/DKT/data/
+Models/AnswerEvaluator/data/
+
+# Large model weights (> GitHub 100 MB limit) — regenerate via train/download scripts
+Models/AnswerEvaluator/checkpoints/*.pt
+Models/GroundingDINO/checkpoints/

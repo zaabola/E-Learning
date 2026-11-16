@@ -1,0 +1,5 @@
+model,epoch,train_loss,test_loss,test_acc_3way,test_macro_f1,test_binary_auc,test_binary_acc,test_score_pearson,test_asag_acc,test_paws_trap_acc,epoch_time_sec,is_best_f1
+DeBERTa-v3-Small,1,0.75369,0.69976,0.76589,0.73923,0.93126,0.8443,0.77307,0.5535,0.9235,891.32,True
+DeBERTa-v3-Small,2,0.45742,0.6907,0.79281,0.76324,0.93276,0.86027,0.7852,0.61427,0.92712,888.01,True
+DeBERTa-v3-Small,3,0.31853,0.75678,0.7977,0.76972,0.93516,0.86663,0.79298,0.61088,0.9355,893.28,True
+DeBERTa-v3-Small,4,0.24016,0.83771,0.79837,0.77029,0.92413,0.86641,0.79036,0.613,0.93612,891.46,True

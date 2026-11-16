@@ -1,0 +1,5 @@
+model,epoch,train_loss,test_loss,test_acc_3way,test_macro_f1,test_binary_auc,test_binary_acc,test_score_pearson,test_asag_acc,test_paws_trap_acc,epoch_time_sec,is_best_f1
+MiniLM-L12-H384,1,0.94703,0.79327,0.73135,0.69805,0.90106,0.8087,0.70135,0.53602,0.8865,376.99,True
+MiniLM-L12-H384,2,0.61791,0.73073,0.77176,0.73327,0.91674,0.83584,0.74287,0.60651,0.91938,381.49,True
+MiniLM-L12-H384,3,0.48469,0.75872,0.76869,0.73878,0.9204,0.841,0.74331,0.59115,0.91875,384.13,True
+MiniLM-L12-H384,4,0.41096,0.78181,0.77172,0.74377,0.91957,0.84203,0.74116,0.60285,0.91738,382.54,True

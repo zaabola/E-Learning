@@ -1,368 +1,320 @@
-# FIRERED — a fan-made, GBA-style browser RPG
+# Adaptive E-Learning RPG — Intelligent Tutoring Platform
 
-> **About this project:** this is a trial test of the new Claude model **"Fable 5"**.
-> The entire game — engine, battle system, data, maps, UI, audio, and mobile
-> support — was generated from a **single-shot prompt** (reproduced in full at
-> the bottom of this README), then iterated with bug-fix passes.
->
-> Non-commercial fan project for AI-capability testing. **Pokémon is
-> © Nintendo / Creatures Inc. / GAME FREAK Inc.** This project is not
-> affiliated with, endorsed by, or connected to them in any way.
+An AI-powered adaptive educational RPG developed in vanilla HTML5/Canvas/JavaScript paired with a local, multi-model PyTorch AI backend. The platform transforms academic course material into an interactive retro adventure where learning occurs through exploration, adaptive turn-based battles, and interactive visual investigations.
 
-A single-page monster-catching RPG in plain HTML/CSS/JavaScript. No build
-tools, no dependencies, no server — open `index.html` and play, or deploy the
-folder as a static site.
+The system operates **100% locally with zero webcam surveillance**, preserving full learner privacy (GDPR/FERPA compliant) by modeling cognitive mastery, memory decay, and engagement strictly through in-game behavioral telemetry.
 
-## Run
+---
 
-- **Live 3-Model AI Mode (Recommended):**
-  ```bash
-  .\.venv\Scripts\python.exe server.py
-  ```
-  Then open `http://127.0.0.1:8000` (or double-click `index.html` while `server.py` is running). This connects gameplay live to all three local PyTorch checkpoints (`Final-DKT-GRU`, `Double-DQN` RL Game Master, and `DeBERTa-v3-Small` Cross-Encoder Answer Grader) with spoken 15-second `.wav` Podcast Hints and zero webcam usage.
-- **Standalone Static / Offline Fallback:** open `index.html` directly (`file://` works — plain script tags, no modules; `js/ai_tutor.js` automatically falls back to an embedded client-side YOLO & OCR curriculum if `server.py` is off).
-- **Deployed:** any static host serves it as-is (see Deploy below).
+## 1. End-to-End System Architecture
 
-## KnowledgeQuest 3-Model AI & Computer Vision Course
+The platform connects upstream course material (notes, textbook summaries, and audio lectures) to a closed-loop, multi-tier AI game engine:
 
-- **Course (`course_material/vision_yolo_ocr/`):** 5-concept Prerequisite Knowledge Graph covering **C0: CNN Backbones & Feature Pyramids (FPN)**, **C1: Bounding Boxes, IoU & NMS**, **C2: Single-Stage Real-Time Detection & YOLO**, **C3: OCR (DBNet, CRNN & CTC Loss)**, and **C4: End-to-End YOLO + OCR Vision Pipelines** (55 original questions + Summary Notes + 5 spoken `.wav` Podcast Clips).
-- **Closed-Loop Battle Combat:** Every player attack triggers an adaptive encounter chosen by `Double-DQN` (`[0]` 15s Spoken Podcast Hint + Easy Quiz, `[1]` Easy Quiz, `[2]` Medium Flow Quiz, `[3]` Prerequisite Review, or `[4]` Open-Text Boss Synthesis graded semantically by `DeBERTa-v3-Small`). Players can also press **`T`** on any multiple-choice turn to answer in their own words, or **`H`** to play the Podcast Hint!
-- **Field Journal (`ENTER -> JOURNAL`):** 3-tab HUD displaying live `Final-DKT-GRU` 5-concept mastery bars, `★` Concept Synthesis Badges, webcam-free behavioral affect (`Focus / Frustrated / Bored`), scrollable YOLO & OCR Study Notes with audio playback, and a live Course / Learner Profile switcher.
+```mermaid
+flowchart TD
+    %% UPSTREAM
+    subgraph UPSTREAM ["Upstream Input: Educational Content (Dynamic Course Package)"]
+        Notes["Course Syllabus & Structured Summary Notes"]
+        Audio["Lecture / Podcast Audio (.wav / .mp3) + Transcript"]
+    end
 
-## Controls (desktop)
+    %% STAGE 1: INGESTION & TOPOLOGY
+    subgraph STAGE1 ["Stage 1: Curriculum Topology & Speech Alignment"]
+        KG["Model 1: Knowledge Graph Engine (Symbolic DAG)\n• Extracts prerequisite concept graph (DAG)\n• Maps syllabus dependencies to game world geography"]
+        FA["Model 2: Audio Forced-Aligner (WhisperX / wav2vec2)\n• Aligns transcript to millisecond timestamps\n• Slices audio into in-game 'Research Voice Logs'"]
+    end
 
-| Key | Action |
-| --- | --- |
-| Arrows / WASD | Move / navigate menus |
-| Z / Space | A — confirm, talk, interact |
-| X / Esc / Backspace | B — cancel, back |
-| Enter | Confirm; opens the menu in the overworld |
-| M | Toggle sound |
+    %% STAGE 2: IN-GAME VISION & TELEMETRY
+    subgraph STAGE2 ["Stage 2: Privacy-First In-Game Perception (Zero Webcam)"]
+        Diagrams["In-Game Laboratory Monitors & Technical Schematics"]
+        GDINO["Model 3: Grounding DINO (Open-Vocabulary ViT)\n• Evaluates student clicks & dragged bounding boxes\n• Zero-shot component grounding on course schematics"]
+        Telemetry["Behavioral Interaction Telemetry\n• Response latency, hesitation bands, and retry dynamics"]
+    end
 
-## Mobile controls & PWA
+    %% STAGE 3: THE ADAPTIVE COGNITIVE BRAIN
+    subgraph STAGE3 ["Stage 3: The Adaptive Cognitive Brain (Custom Trained)"]
+        DKT["Model 4: Deep Knowledge Tracing (Final-DKT-GRU)\n• Tracks multi-concept mastery vector P(Mastery)\n• Models Ebbinghaus spaced-repetition forgetting curves"]
+        RL["Model 5: Adaptive Game Master (Dueling Double-DQN)\n• Dynamic Difficulty Adjustment (DDA) under Flow Theory\n• Selects optimal encounter type [0..4] in <1ms"]
+    end
 
-The game is fully playable on phones, in **landscape only**:
+    %% STAGE 4: MULTI-AGENT LLM CONTENT GENERATION
+    subgraph STAGE4 ["Stage 4: Distributed Multi-Agent LLM Generation (Kaggle GPUs)"]
+        Reasoner["Model 6: Pedagogical Reasoner LLM (DeepSeek-R1 / Qwen2.5)\n• Extracts core competencies, verified questions, and distractors\n• Guarantees zero academic hallucination"]
+        Stylist["Model 7: Persona & Narrative Stylizer LLM (Llama-3.1-8B QLoRA)\n• Injects witty, sarcastic dialogue matching retro RPG character boxes"]
+    end
 
-- Portrait shows a full-screen "Please rotate your device" overlay
-  (plus a best-effort `screen.orientation.lock('landscape')` attempt).
-- **True fullscreen on every device:** the logical viewport *widens*
-  (240–360 logical px) to match the screen's aspect ratio, then scales —
-  no letterboxing on desktop or phones. Press **F** for browser
-  fullscreen on desktop. The page itself never scrolls or bounces.
-- Touch controls are overlaid **inside the game** like mobile RPG ports:
-  semi-transparent **D-pad** bottom-left (hold to keep walking), **A / B**
-  bottom-right with the **START** pill stacked above A — all driving the
-  same input layer as the keyboard.
-- Controls appear only when touch is the **primary** input (coarse pointer
-  + no hover) — touchscreen laptops stay in keyboard mode; a real tap shows
-  the controls, a keypress hides them again.
-- **Installable PWA**: `manifest.json` (fullscreen display, landscape
-  orientation, pixel-Charizard app icon on a fire-red background) plus a
-  cache-first service worker, so the deployed game can be added to the
-  home screen and played offline.
+    %% STAGE 5: EVALUATION & GAMEPLAY
+    subgraph STAGE5 ["Stage 5: Real-Time Battle Evaluation & Game Engine"]
+        FastEval["Model 8: Semantic Answer Evaluator (DeBERTa-v3-Small)\n• Instant free-text grading (<15ms on CPU / <10ms on GPU)\n• Computes RPG attack damage and critical strikes"]
+        Game["Browser RPG Engine (HTML5 Canvas / GBA-Style Experience)"]
+        Player((Student Player))
+    end
 
-## Progression
-
-1. Wake up in your room, head downstairs — MOM sends you off with a Potion.
-2. Choose Bulbasaur, Charmander, or Squirtle at Prof. MAPLE's lab.
-3. Your rival REX grabs the type-advantaged starter and battles you on the spot.
-4. FERNWAY TRAIL: tall-grass wild encounters (Pidgey, Rattata, Caterpie,
-   Weedle, Lv 2–5) and two line-of-sight trainers.
-5. STONEGATE: a classic red-roof **Pokémon Center** (free healing), a
-   blue-roof **Poké Mart** (shop), and the gym — beat Trainee ROCCO and
-   Leader MASON for the GRANITE BADGE.
-6. Save anytime — browser slot or a portable save code you can import from
-   the title screen.
-
-## Mechanics (Gen-3-modeled)
-
-- Gen 3 damage formula with STAB, 85–100% variance, criticals (1/16; 1/8
-  high-crit), and the full real type chart (all 17 types).
-- Stats HP/Atk/Def/SpA/SpD/Spe; speed order; ±6 stat stages **including
-  accuracy and evasion**.
-- Status: poison, burn (halves physical Atk), paralysis (¼ speed, 25% full
-  para), sleep (2–4 turns), freeze (20% thaw; fire moves thaw). Fire-types
-  can't be burned; Poison/Steel-types can't be poisoned.
-- Volatiles: flinch, confusion (2–5 turns, 50% self-hit), Leech Seed.
-- Multi-hit moves (Fury Attack, Pin Missile, Twineedle), Super Fang,
-  priority (Quick Attack), PP and Struggle.
-- Gen 3 catch formula (HP, catch rate, ball bonus, status bonus) with a
-  focused capture sequence: HUD clears, suck-in shrink, up to three wobbles
-  with beeps, lock click + star burst — or a break-open flash with flying
-  shell fragments on escape.
-- **Later-gen EXP Share:** every able party member earns experience from
-  each KO — participants get the full amount, benchwarmers half.
-- **Shiny encounters (1/512):** every generated creature can roll shiny,
-  with real shiny sprites, a sparkle + callout on wild entry, and shiny
-  thumbnails in the party screen.
-- Trainer battles show the opponent's team as ball icons that darken as
-  each one faints; trainers watch **all four directions** — you can't
-  sneak behind them.
-- **Authentic GBA FireRed battle presentation & sprite-sheet choreography:**
-  - GBA encounter flash + horizontal split scanline curtain wipe + opposing horizontal platform slide-ins (Grass, Lab/Indoor, and Stonegate Rock Gym arenas).
-  - **5-frame animated Red back-sprite throw** (`player_back_throw.png`), front battle sprites for all 5 trainers (`REX`, `CAL`, `MIRA`, `ROCCO`, `MASON`), and authentic 64×64 FireRed Pokémon front/back/shiny sprites anchored flush on platform bases.
-  - **3-state opening/closing Poké Ball & Great Ball animations** (send-out materialization with magenta energy glow, recall shrink, double-bounce wild capture wobbles, lock darkening + catch stars, and breakout).
-  - **Multi-stage sprite-sheet animations for all 35 moves** (fire plumes & meteors, bubbles & water spouts, vine whips, spinning razor leaves, sprouting leech seeds, tornados, wind blades & feathers, spider webs, stinger needles, snapping jaws, claw slashes, psychic eyes/rings with GBA H-blank sine-wave distortion, scary face, smoke/sand clouds) plus **pixel-masked scrolling FireRed stat-stage chevron waves** (`source-atop`), status animations (orbiting confusion ducks, rising sleep `Z`s, poison flames, paralysis sparks), pixel-art Type/Status HUD badges, and ground-clipped fainting.
-- Level-ups, move learning with replace prompt, level evolutions
-  (starters 16, Caterpie/Weedle lines 7→10, Pidgey 18, Rattata 20, mid
-  evolutions 32/36). Blacking out returns you to the most recently visited
-  healing center (home before you've reached one).
-
-## Assets
-
-- All images are **downloaded locally** into `assets/` by two dev scripts
-  (`node download-assets.js`, `node download-overworld.js`) — the game never
-  hotlinks at runtime and works fully offline.
-- In-game loading is **lazy with a background warm-up**: nothing blocks the
-  page; every image is created on demand, and a `preloadAll()` pass right
-  after first paint caches the rest (including all shiny variants) while
-  you're still on the title screen.
-- Authentic GBA FireRed battle sprites (`Pokemon.png`, `Trainers.png`), arenas (`Battle Backgrounds.png` ripped by Desgardes), Poké Balls (`Poke Balls.png` by Blue, HitH, SP.Ice), attack/move effects (`Attack Effects.png` by wormintheworks; `Move Effects.png` by Neslug), stat chevron waves (`Stat Effects.png` by LDEJRuff / Jackster), and HUD/type/status sheets (`HP Bars & In-battle Menu.png` by redblueyellow; `Type & Status Icons.png`) are extracted locally into `assets/` via `python extract_firered_battle_assets.py`. Item icons and supplementary sprites come from [42arch/pokemon-dataset-zh](https://github.com/42arch/pokemon-dataset-zh) and [PokeAPI/sprites](https://github.com/PokeAPI/sprites).
-- Overworld art — tilesets, building exteriors, character walk-cycle sheets,
-  and the battle background — comes from
-  [torresflo/Pokemon-Obsidian](https://github.com/torresflo/Pokemon-Obsidian)
-  (a PSDK/Pokémon Studio fan game). GPL-3 applies to that project's *code*;
-  the artwork itself remains Nintendo-derived.
-- The renderer slices 32px tileset cells onto the game's 16px grid, draws
-  whole-building images over grassed footprints, and animates 4-direction
-  × 4-frame walk cycles anchored at the feet. If any image is missing or
-  fails to load, every surface **falls back to the original code-drawn
-  art**, which stays in the codebase.
-- Sprite/character/tile designs **© Nintendo / Creatures Inc. / GAME FREAK
-  Inc.** — used here non-commercially for a model-capability test; this
-  project is not affiliated with or endorsed by them.
-
-## Deploy (Vercel)
-
-1. Push this folder to a GitHub repo (it's already a git repo — just add a
-   remote and push).
-2. In Vercel: **Add New → Project → Import** the repo.
-3. Done. `vercel.json` pins it as a zero-build static site (`framework: null`,
-   no build command, `index.html` at the root, long-lived cache headers for
-   `assets/`, day-long for `js/`/`css/`).
-
-## Code layout
-
-| File | Role |
-| --- | --- |
-| `js/main.js` | Game state, title screen, main loop, mobile setup |
-| `js/overworld.js` | Tile engine, movement, NPCs, LOS trainers, warps, menus |
-| `js/battle.js` | Battle system, catch logic, hit effects, screen shake |
-| `js/ui.js` | Input (keyboard + touch), typewriter dialog, menus, HUD |
-| `js/save.js` | Browser save slot + portable save codes |
-| `js/audio.js` | Web Audio SFX (synthesized, including the title roar) |
-| `js/data/*.js` | Types, moves, species, items, maps, drawn sprites, image assets |
-| `AGENTS.md` / `CLAUDE.md` | Continuation guides for AI agents (see below) |
-| `assets/sprites/`, `assets/items/` | Battle sprites (front/back + shiny variants) + item icons |
-| `assets/overworld/` | Tilesets, building images, flower autotile |
-| `assets/characters/` | 4-direction walk-cycle sheets (player + NPCs) |
-| `assets/battle/` | Battle background |
-| `assets/icons/`, `assets/og-image.png` | PWA app icons + link-preview card |
-| `manifest.json` / `sw.js` | PWA manifest (fullscreen, landscape) + offline service worker |
-| `download-assets.js` | Dev script: battle sprites + item icons |
-| `download-overworld.js` | Dev script: Pokemon-Obsidian overworld art |
-| `validate.js` | Dev-only data integrity checker (`node validate.js`) |
-| `vercel.json` | Zero-config static deployment |
-
-## For AI agents continuing this project
-
-Two guides ship with the repo so any capable model can pick the work up at
-the same quality bar:
-
-- **`AGENTS.md`** — the canonical guide: architecture map, the hard rules
-  (no build step, fallback-first rendering, local-only assets, validation
-  gates, single-amended-commit git workflow, originality posture), the
-  sharp edges already hit (one-shot input semantics, decal body geometry,
-  pixel-snapping rules), and the quality bar for new work.
-- **`CLAUDE.md`** — Claude-specific workflow notes on top of AGENTS.md
-  (validation commands, tooling caveats, where to start per task type).
-
-## Debug helpers (browser console)
-
-```js
-DEBUG.give('pidgey', 12)   // add a team member
-DEBUG.heal()               // restore the party
-DEBUG.money(99999)
-DEBUG.warp('stonegate', 9, 13)
+    Notes --> KG
+    Audio --> FA
+    KG -->|"World map zones & barriers"| Game
+    FA -->|"Timestamped audio clues"| Game
+    Game --> Diagrams
+    Player -->|"Clicks schematic component"| GDINO
+    GDINO -->|"IoU alignment & score"| DKT
+    Player -->|"Explores, battles & answers"| Game
+    Game --> Telemetry
+    Telemetry --> DKT
+    Telemetry --> RL
+    DKT -->|"Mastery & memory decay"| RL
+    KG -->|"Prerequisite hierarchy"| RL
+    RL -->|"Target concept & difficulty tier"| Reasoner
+    Reasoner -->|"Verified pedagogical JSON"| Stylist
+    Stylist -->|"RPG battle dialogue & NPC banter"| Game
+    Game -->|"Typed explanation"| FastEval
+    FastEval -->|"Damage multiplier [0..1]"| Game
+    FastEval -->|"Updates mastery state"| DKT
 ```
 
 ---
 
-## The single-shot prompt
+## 2. Model Overview & Benchmark Results
 
-The prompt below is self-contained and would recreate this system from
-scratch in one shot.
+The platform deploys specialized machine learning models chosen through empirical benchmarking rather than generic wrappers:
 
-```text
-Build a complete, playable, FireRed-inspired monster-catching RPG as a pure
-static web app in a folder called pokemon-rpg. Requirements:
+### Model 1: Cognitive Knowledge Tracer (`Final-DKT-GRU`)
+* **Role**: Tracks latent concept mastery over time and predicts memory decay to trigger spaced-repetition encounters before concepts are forgotten.
+* **Architecture**: 2-layer Context-Aware LayerNorm GRU (`hidden_dim = 128`, `dropout = 0.25`) with a 13-dimensional behavioral telemetry encoder (log latency, rapid-guess `<5s`, flow `5-15s`, deliberate `15-60s`, struggle `>60s`, retry counts, scaffold usage, answer format) and dual concept-fusion prediction heads.
+* **Trained On**: ASSISTments Benchmark (`432,928` clean interaction sequences across `123` skills).
+* **Benchmark Results**:
+  * **Test ROC-AUC**: **`0.7996`** (outperforming baseline `DKT-LSTM` at `0.7732` and standard `DKT-GRU` at `0.7754`).
+  * **Test Accuracy**: **`74.43%`**.
+  * **Anti-Guessing Calibration**: Distinguishes rapid lucky guesses (`61.0%` mastery update) from deliberate, reasoned answers (`85.3%`).
+  * **Inference Speed**: **`2.37 ms`** on CPU.
 
-TECH
-- Vanilla HTML + CSS + JavaScript only. No build tools, no modules, no
-  server: it must run by double-clicking index.html (file://) and deploy
-  unchanged as a static site (include a vercel.json with framework null and
-  no build step, plus cache headers for js/css/assets).
-- Organize the code into separate files: engine/overworld, battle system,
-  UI/input, save system, audio, and a js/data/ folder with types, moves,
-  species, items, maps, drawn sprites, and image-asset loading.
+### Model 2: Pedagogical Game Master (`Dueling Double-DQN`)
+* **Role**: Dynamic Difficulty Adjustment (DDA). Reads the student's cognitive state and behavioral affect to choose the optimal learning intervention according to Csikszentmihalyi's Flow Theory.
+* **Architecture**: Dueling Deep Q-Network separating State Value $V(s)$ and Advantage $A(s, a)$ streams over a 12-dimensional student state space (target mastery, prerequisite deficit, fail streak, win streak, frustration, boredom, overall mastery, turn progress, concept context).
+* **Action Space**:
+  * `[0]` Audio Hint + Scaffolded Quiz (rescues frustrated/tilted learners).
+  * `[1]` Easy Recall Wild Encounter (builds early confidence).
+  * `[2]` Medium Flow Trainer Battle (sustains optimal challenge).
+  * `[3]` Prerequisite Review Battle (remediates foundation gaps).
+  * `[4]` Hard Open-Text Boss Synthesis Challenge (unlocks concept badges).
+* **Calibrated On**: **`6,123,270` rows (`2.80 GB`)** of empirical student affective interaction logs.
+* **Benchmark Results**:
+  * **Mean Evaluation Reward**: **`+19.23`** (outperforming random policy at `13.41`, static medium at `18.80`, standard DQN at `18.42`, and PPO at `18.91`).
+  * **Affective Metrics**: Highest student focus (**`85.54%`**), lowest frustration (**`29.28%`**), and lowest boredom (**`11.90%`**).
+  * **Decision Speed**: **`0.258 ms`** on CPU.
 
-DATA (real, Gen 3 values)
-- The first 20 National Dex Pokémon (Bulbasaur through Raticate) with their
-  real names, types, Gen 3 base stats, catch rates, base EXP yields,
-  FireRed level-up learnsets, and evolution levels (starters 16,
-  Caterpie/Weedle 7 then 10, Pidgey 18, Rattata 20, mid evolutions 32/36).
-- Real moves with actual power/accuracy/PP/type and the Gen 3 by-type
-  physical/special split: Tackle, Scratch, Growl, Tail Whip, String Shot,
-  Sand Attack, Smokescreen, Sweet Scent, Scary Face, FeatherDance, Growth,
-  Harden, Withdraw, Agility, Supersonic, Vine Whip, Razor Leaf, Leech Seed,
-  Sleep Powder, Stun Spore, PoisonPowder, Poison Sting, Ember, Flamethrower,
-  Metal Claw, Slash, Bubble, Water Gun, Bite, Rapid Spin, Quick Attack,
-  Gust, Wing Attack, Twister, Fury Attack, Pin Missile, Twineedle,
-  Confusion, Psybeam, Hyper Fang, Pursuit, Super Fang, Struggle.
-- The complete real 17-type Gen 3 type chart.
-- Real items at FireRed prices: Potion 300, Super Potion 700, Antidote 100,
-  Paralyze Heal 200, Awakening 250, Burn Heal 250, Ice Heal 250,
-  Full Heal 600, Poke Ball 200, Great Ball 600.
+### Model 3: Semantic Answer Evaluator (`DeBERTa-v3-Small`)
+* **Role**: Evaluates open-ended, free-text student explanations during boss encounters and tactical attacks, scoring conceptual equivalence against reference summaries in real time.
+* **Architecture**: Cross-Encoder transformer (`microsoft/deberta-v3-small`, `142.5M` parameters) with a 3-way classification head (`correct`, `partial`, `incorrect`) and continuous score calibration.
+* **Trained On**: Master dataset of **`99,631` pairs** unifying classroom student answers (`SciEntsBank`, `Beetle`), natural language inference (`MultiNLI`), semantic similarity (`STS-B`), and adversarial word swaps (`Google PAWS`).
+* **Benchmark Results**:
+  * **3-Way Accuracy**: **`79.84%`** (vs. keyword overlap baseline at `39.95%` and MiniLM at `77.17%`).
+  * **Binary ROC-AUC**: **`0.9241`**.
+  * **Adversarial PAWS Trap Accuracy**: **`93.61%`** (resists negation tricks and inverted cause-effect traps where word overlap exceeds 90%).
+  * **Latency**: **`10.2 ms`** on GPU / **`<25 ms`** on CPU.
 
-BATTLE SYSTEM (Gen 3 mechanics)
-- Fight / Bag / Switch / Run menu; up to 4 moves with PP; Struggle when dry.
-- Gen 3 damage formula: ((2L/5+2) * power * A/D)/50 + 2, then crit x2
-  (1/16 base, 1/8 high-crit), STAB 1.5, type effectiveness, random 85-100%.
-- Stat stages -6..+6 for Atk/Def/SpA/SpD/Spe AND accuracy/evasion
-  (3-based multiplier), burn halving physical attack, paralysis quartering
-  speed with 25% full paralysis, sleep 2-4 turns, freeze with 20% thaw and
-  fire-move thawing, poison/burn chip at 1/8 max HP.
-- Volatile conditions: flinch (Bite/Hyper Fang/Twister), confusion
-  (2-5 turns, 50% chance to hit yourself with a 40-power typeless physical),
-  Leech Seed (1/8 drain healing the opponent, fails on Grass types).
-- Multi-hit distribution 2/2/3/3/4/5 for Fury Attack and Pin Missile;
-  Twineedle hits twice with 20% poison per hit; Super Fang halves HP.
-- Status immunities: Fire can't be burned, Poison/Steel can't be poisoned.
-- Catching: Gen 3 catch formula a = (3M-2H)*rate*ball/(3M) * status bonus
-  (2x sleep/freeze, 1.5x others), b = 1048560/sqrt(sqrt(16711680/a)), four
-  16-bit shake checks. Stage the capture for focus: hide the HUD boxes,
-  throw arc, suck-in shrink, up to three visible wobbles each with a beep,
-  then a lock click with a star burst on success — or a break-open white
-  flash with red/white shell fragments plus screen shake on escape. Caught
-  Pokémon join the party (max 6) or a vault.
-- Later-gen EXP Share: EVERY able party member earns EXP per KO — base
-  yield*level/7 (x1.5 vs trainers) in full for battle participants, half
-  for the bench. Cubic level curve, stat growth on level-up, learnset
-  prompts with "forget a move?" replacement, evolution after battle.
-- Shiny system: every generated creature rolls shiny at 1/512; download the
-  real shiny front/back sprites too, sparkle + callout when a shiny wild
-  appears, shiny thumbnails in the party screen.
-- Trainer battles show the opponent's team as ball icons on the enemy HUD
-  box, darkening one per faint. Trainers in the overworld watch all four
-  directions — approaching from behind still triggers the battle.
-- Turn order by priority then effective speed; simple AI that prefers
-  super-effective damaging moves 60% of the time.
-- Canvas-rendered battle scene: enemy front sprite and player back sprite,
-  HP boxes with animated color-shifting bars (numbers on BOTH boxes), EXP
-  bar, per-move-type particle hit effects (flames, droplets, electric
-  streaks, leaves, poison bubbles, psychic rings, rock chunks, slash
-  streaks) and screen shake on impact.
+### Model 4: In-Game Diagram Vision Evaluator (`Grounding DINO Tiny`)
+* **Role**: Evaluates interactive visual investigations on laboratory monitors and technical schematics without requiring camera access.
+* **Architecture**: Open-Vocabulary Vision Transformer (`IDEA-Research/grounding-dino-tiny`, `172.3M` parameters) running zero-shot grounded object detection on course diagrams.
+* **Benchmark Results**:
+  * **Audit Success**: **`30/30` scenarios passed (`100.0%`)** across click precision, dragged bounding-box IoU, and distractor rejection.
+  * **Mean Dragged-Box IoU**: **`0.894`**.
+  * **Latency**: **`522 ms`** on CUDA.
 
-WORLD & PROGRESSION (FireRed opening arc, original writing)
-- Beat-for-beat: wake up in your upstairs bedroom -> downstairs, a parent
-  NPC sends you off with a Potion (and offers free healing later) -> the
-  professor's lab in town -> choose 1 of 3 starters from desks -> a cocky
-  rival immediately picks the type-countering starter and battles you in
-  the lab, then leaves.
-- Three connected outdoor areas: starting town (player house, rival house,
-  lab), a north route with tall-grass random encounters (Pidgey/Rattata/
-  Caterpie/Weedle Lv2-5, ~14% per step) and two line-of-sight trainers who
-  spot you, walk up, and battle; and a second town with a classic red-roof
-  Pokemon Center (nurse heal flow, healing machine, benches), a blue-roof
-  Poke Mart (clerk, shelves, buy flow with quantity picker), and a
-  Rock-themed gym: a trainee with Harden-walls plus Leader MASON
-  (Pidgeotto 11 / Raticate 13) who awards the GRANITE BADGE.
-- Tile-based overworld: grid movement (arrows/WASD) with tap-to-turn,
-  collision, camera, map links and door/stair warps with fades, signs,
-  multi-page typewriter NPC dialogue for every NPC (parent, professor,
-  rival, hint-giving townsfolk, nurse, clerk, trainers with pre/post lines),
-  a start menu (Party with reordering, Bag with item use, Badges, Save),
-  blackout-to-respawn on defeat with halved money.
-- All character names, town names, and dialogue must be original writing -
-  do not copy any text from the actual games.
+---
 
-ASSETS
-- Write a node script that downloads, into a local assets/ folder, front
-  battle sprites, back sprites, SHINY front/back variants, and item icons
-  for the 20 species and 10 items from
-  github.com/42arch/pokemon-dataset-zh, falling back to
-  github.com/PokeAPI/sprites raw URLs for anything missing; verify PNG
-  magic bytes. The game must reference only the local files (offline-safe).
-- Write a second node script that downloads real overworld art from
-  github.com/torresflo/Pokemon-Obsidian (inspect the repo's
-  Obsidian/Graphics tree via the GitHub API first): an outdoor tileset and
-  an interior tileset, whole-building images (house, healing center, mart),
-  a flower autotile, 4-direction x 4-frame RMXP-style character walk sheets
-  for the hero and every NPC kind, and a grass battle background.
-- Renderer requirements for that art: run the canvas at 2x internal
-  resolution with a setTransform(2,0,0,2,0,0) so 32px sources land on
-  device pixels 1:1; slice 32px tileset cells onto the 16px logical grid
-  via per-legend-char source-rect maps (separate indoor / outdoor tables,
-  multi-layer tiles with a base tile under transparent or taller-than-tile
-  art such as trees and shelves); snap the camera to whole device pixels
-  to avoid scroll seams; draw whole-building images over grass-rendered
-  footprints — MEASURE each building's opaque pixel bounds first (the
-  files carry transparent shadow padding) and anchor/collide using that
-  body rect, bottom-centered on the door row, marking body-covered tiles
-  solid except the door; animate character walk cycles from the step tween
-  with feet-anchored frames at native scale and an idle frame when
-  standing; draw the battle background cover-scaled with soft ground
-  shadows under each combatant instead of flat platform ellipses.
-- Asset loading must be lazy (Images created on first use) plus a
-  background preloadAll() shortly after first paint so page load is
-  unaffected but everything is cached early.
-- GRACEFUL FALLBACK everywhere: also implement simple code-drawn pixel
-  tiles/characters/creature sprites, and use them automatically for any
-  image that is missing or fails to load.
-- Blackout respawn: blacking out returns the player to the most recently
-  ENTERED healing center (set on entry, not on heal); home until then.
-- Also ship AGENTS.md and CLAUDE.md continuation guides covering the
-  architecture, the no-build/fallback/local-asset rules, the validation
-  gates, and the git amend-into-one-commit workflow.
-- Title screen: FIRERED logo text, warm fire-gradient background with
-  drifting embers, a large Charizard front sprite, a synthesized roar on
-  the first key press, and the menu placed so the sprite stays visible.
+## 3. Codebase Structure
 
-UI / POLISH
-- GBA-style bordered dialog boxes with typewriter text (skip on press),
-  bottom-right 2x2 battle menu, move panel with PP/type, party screen with
-  HP bars and status chips, bag and shop screens with real item icons,
-  battle intro flash/fade transition, retro pixel font (Press Start 2P with
-  monospace fallback), synthesized Web Audio SFX for every interaction
-  (cursor, confirm, hits by effectiveness, faint, heal jingle, level-up,
-  catch sequence, badge fanfare), M to mute.
-- Save system: localStorage slot plus an exportable/importable base64 save
-  code (title screen has CONTINUE / NEW GAME / IMPORT CODE).
-
-MOBILE / FULLSCREEN
-- Proper viewport meta (width=device-width, initial-scale=1,
-  user-scalable=no), fullscreen-friendly meta tags. The page itself never
-  scrolls or bounces (overflow hidden, position fixed in touch mode,
-  touchmove preventDefault outside textareas).
-- Landscape-only on touch devices: CSS portrait overlay saying "Please
-  rotate your device" plus a try/catch screen.orientation.lock attempt.
-- TRUE fullscreen everywhere: the logical viewport WIDENS (240-360 logical
-  px) to match the screen aspect, the canvas and stage resize with it, and
-  the stage scales via transform — no letterboxing on desktop or phone.
-  F toggles browser fullscreen on desktop. The battle scene stays a 240px
-  composition centered in the wider viewport with the backdrop
-  cover-scaled across it.
-- On-screen touch controls overlaid INSIDE the game like mobile RPG ports:
-  semi-transparent D-pad bottom-left (press-and-hold keeps walking), A and
-  B bottom-right with the START pill stacked above A, >=48px targets,
-  touchstart/touchend with preventDefault, wired into the exact same input
-  layer as the keyboard.
-- Controls show only when touch is the PRIMARY input (pointer: coarse AND
-  hover: none) — touchscreen laptops stay keyboard-first; a real tap shows
-  the controls and a keypress hides them.
-
-QUALITY
-- Include a node-runnable validate.js that checks map row widths, warp
-  targets landing on walkable tiles, learnset/species/item references, and
-  sprite data integrity. All JS must pass node --check.
 ```
+.
+├── server.py                                # Local multi-model HTTP API server & static host
+├── index.html                               # Game entry point (runs via server or file://)
+├── validate.js                              # Data integrity gate (map bounds, collision, warps)
+├── extract_firered_battle_assets.py         # Deterministic GBA sprite & arena asset extractor
+│
+├── js/                                      # Browser RPG Client Engine
+│   ├── main.js                              # Game loop, adaptive viewport scaling, PWA lifecycle
+│   ├── overworld.js                         # Tile engine, grid movement, 4-way LOS trainers, warps
+│   ├── battle.js                            # GBA combat engine, catch formula, particle animations
+│   ├── ui.js                                # GBA dialogue boxes, tactical selectors, Grounding DINO modal
+│   ├── ai_tutor.js                          # Client-side AI bridge & offline curriculum fallback
+│   ├── audio.js                             # Web Audio chiptune & battle SFX synthesis
+│   ├── save.js                              # LocalStorage slot & portable base64 save codes
+│   └── data/                                # Game registries (types, moves, species, maps, sprites)
+│
+├── Models/                                  # Machine Learning Subsystems
+│   ├── DKT/                                 # Model #1: Deep Knowledge Tracing
+│   │   ├── checkpoints/                     # best_final_gru_model.pt, skill_mapping.json
+│   │   ├── scripts/                         # dataset.py, model.py, train_final_gru.py, test_final_gru.py
+│   │   ├── results/                         # models_summary.csv, training logs
+│   │   └── eda.py                           # ASSISTments forensic exploratory data analysis
+│   │
+│   ├── RL/                                  # Model #2: Pedagogical Game Master
+│   │   ├── checkpoints/                     # double_dqn_gamemaster.pt, ppo_gamemaster.pt
+│   │   ├── scripts/                         # student_env.py, models.py, train_final_dqn.py, test_rl_gamemaster.py
+│   │   ├── results/                         # rl_models_summary.csv, training logs
+│   │   └── eda_affective.py                 # Affective calibration & telemetry dynamics
+│   │
+│   ├── AnswerEvaluator/                     # Model #3: Semantic Answer Evaluator
+│   │   ├── checkpoints/                     # deberta_v3_grader.pt, tokenizers
+│   │   ├── scripts/                         # grader_dataset.py, grader_models.py, train_deberta.py, test_answer_grader.py
+│   │   ├── results/                         # grader_models_summary.csv, training logs
+│   │   ├── download_dataset.py              # Multi-domain benchmark fetcher & merger
+│   │   └── eda.py                           # Text length & semantic overlap analysis
+│   │
+│   ├── GroundingDINO/                       # Model #4: In-Game Diagram Vision Grounding
+│   │   ├── checkpoints/                     # Local grounding_dino_tiny weights
+│   │   ├── scripts/                         # dino_evaluator.py, generate_course_diagrams.py, test_grounding_dino.py
+│   │   ├── data/                            # diagram_puzzles.json
+│   │   └── results/                         # grounding_dino_summary.csv
+│   │
+│   ├── engine/                              # AI Integration Layer
+│   │   ├── knowledgequest_engine.py         # Master closed-loop orchestrator (<30ms/turn)
+│   │   └── curriculum_bank.py               # Prerequisite DAG & dynamic course loader
+│   │
+│   └── test_integrated_pipeline.py         # End-to-end multi-model integration test & terminal RPG
+│
+├── course_material/                         # Dynamic Course Packages
+│   └── generate_podcast_audio.py            # Local TTS generator for 15-second audio hint clips
+│
+└── assets/                                  # Local Game Graphics & Audio
+    ├── battle/                              # Arenas, sliding platforms, Red 5-frame throw, Poké Balls
+    ├── overworld/                           # Tilesets, building decals, character walk sheets
+    ├── sprites/                             # 64x64 creature front/back & shiny variants
+    └── fx/                                  # 35 move animation strips, stat waves, type badges
+```
+
+---
+
+## 4. Execution & Verification Guide
+
+### Prerequisites
+* Windows, macOS, or Linux.
+* Python 3.10+ with CUDA support (CPU fallback is automatically supported).
+* Node.js (for asset downloads and validation checks).
+
+```powershell
+# 1. Clone repository and activate environment
+git clone https://github.com/zaabola/E-Learning.git -b interactive_learning_RPG
+cd E-Learning
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# 2. Install dependencies
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install transformers datasets scikit-learn numpy pillow pyttsx3
+```
+
+---
+
+### Running the Live Platform
+
+Launch the local server hosting the browser RPG and REST endpoints:
+
+```powershell
+.\.venv\Scripts\python.exe server.py --open
+```
+
+* The server initializes all local PyTorch checkpoints (`Final-DKT-GRU`, `Double-DQN`, `DeBERTa-v3-Small`, and `Grounding-DINO-Tiny`).
+* The game opens in your browser at `http://127.0.0.1:8000`.
+* **Offline Resilience**: The RPG can also be played standalone without starting `server.py` by opening `index.html` directly via `file://` — `js/ai_tutor.js` provides client-side rule evaluation.
+
+---
+
+### Running Diagnostic & Verification Tests
+
+Every model and subsystem includes a standalone verification script:
+
+```powershell
+# 1. End-to-End Multi-Model Closed-Loop Pipeline Test
+.\.venv\Scripts\python.exe Models/test_integrated_pipeline.py --auto
+
+# 2. Model #1 (DKT) Behavioral Sanity & Mastery Simulator
+.\.venv\Scripts\python.exe Models/DKT/scripts/test_final_gru.py
+
+# 3. Model #2 (RL Game Master) Policy & Q-Value Diagnostics
+.\.venv\Scripts\python.exe Models/RL/scripts/test_rl_gamemaster.py
+
+# 4. Model #3 (Semantic Grader) Adversarial Negation & Trap Audit
+.\.venv\Scripts\python.exe Models/AnswerEvaluator/scripts/test_answer_grader.py --auto
+
+# 5. Model #4 (Grounding DINO) Diagram Puzzle IoU Benchmark
+.\.venv\Scripts\python.exe Models/GroundingDINO/scripts/test_grounding_dino.py
+
+# 6. Frontend Game Data Integrity Check
+node validate.js
+```
+
+---
+
+## 5. Gameplay Mechanics & Progression
+
+### Controls
+
+| Key | Overworld Action | Battle Action |
+| :--- | :--- | :--- |
+| **Arrows / WASD** | Move character (grid movement) | Navigate menus / select moves |
+| **Z / Space** | Confirm / talk / interact with consoles | Confirm move / advance dialogue |
+| **X / Esc / Backspace** | Cancel / close modal | Return to move select |
+| **Enter** | Open Start Menu | Confirm selection |
+| **T** | — | Switch from multiple-choice to **Open-Text Typing** |
+| **H** | — | Play **Spoken Podcast Audio Hint** |
+| **M** | Toggle chiptune sound & SFX | Toggle audio |
+| **F** | Toggle browser fullscreen | Toggle browser fullscreen |
+
+* **Mobile Support**: On touch devices (coarse pointer, landscape orientation), an in-game semi-transparent D-pad, A/B buttons, and a START pill overlay appear automatically.
+
+---
+
+### Core Gameplay Loops
+
+#### 1. Exploration & Overworld Interactions
+* Navigate a 16px tile-based world with smooth collision, map-link warps, and animated walk cycles.
+* **Line-of-Sight (LOS) Trainers**: Trainers scan all four directions; entering their field of view triggers dialogue and initiates an educational battle.
+* **Laboratory Computer Consoles**: Inspecting consoles (`tile 'H'`) boots the **Grounding DINO Visual Calibration Terminal**, loading technical schematics directly from course material.
+* **Research Audio Bookshelves**: Inspecting bookshelves (`tile 'k'`) plays timestamped 15-second audio logs cut from the course podcast.
+
+#### 2. Adaptive Turn-Based Battles
+* **Authentic Combat Choreography**: Split-scanline curtain wipes, arena platforms, 5-frame trainer throw sequences, entry hops, 35 move-effect strips, and scrolling stat-boost chevron waves.
+* **Combat Damage Driven by Pedagogy**:
+  * Choosing the correct move or submitting an accurate open-text explanation triggers a **Critical Hit** (dealing up to $1.35\times$ damage).
+  * Submitting a partial answer deals a glancing blow ($0.5\times$ damage).
+  * Submitting an incorrect answer or falling for an adversarial trap causes the move to fizzle, giving the opponent a counter-attack window.
+* **Gen-3 Combat & Catch Mechanics**: Full 17-type effectiveness chart, STAB multipliers, accuracy/evasion stages, status conditions (sleep, paralysis, burn, poison, confusion), 3-shake Poké Ball capture calculations, and party-wide EXP distribution.
+
+#### 3. Flow State & Dynamic Difficulty Adjustment
+During gameplay, the **Double-DQN Game Master** continuously evaluates student cognitive metrics:
+* If the learner shows signs of struggle or frustration (fail streak $\ge 2$), the Game Master triggers **Action [0] (Audio Hint + Scaffold)** or **Action [3] (Prerequisite Remediation)**.
+* When the student enters Flow with steady mastery, the Game Master deploys **Action [2] (Trainer Flow Battle)**.
+* When concept mastery reaches $\ge 68\%$, the Game Master initiates **Action [4] (Open-Text Boss Synthesis Challenge)**, evaluated live by `DeBERTa-v3-Small`. A successful explanation awards the **`★` Concept Synthesis Badge**.
+
+#### 4. The Field Journal (`ENTER -> JOURNAL`)
+* **Tab 1 — Mastery & Affect**: Displays real-time DKT mastery bars across curriculum concepts, earned Concept Badges, and telemetry-derived Focus/Frustration/Boredom gauges.
+* **Tab 2 — Study Notes**: Scrollable syllabus bullet points and on-demand playback of 15-second audio lecture clips.
+* **Tab 3 — AI Lab & Grounding DINO**: Model status inspector and direct launcher for the Grounding DINO diagram puzzle suite.
+
+---
+
+## 6. Dynamic Course Integration
+
+The platform is content-agnostic. Rather than being tied to a single subject, courses are defined as structured packages:
+
+```json
+{
+  "course_id": "course_identifier",
+  "title": "Course Name",
+  "concepts": [
+    {
+      "concept_id": 0,
+      "title": "Foundational Concept",
+      "prereqs": [],
+      "podcast_audio": "audio/hint_c0.wav",
+      "podcast_hint": "Spoken key takeaway...",
+      "summary_bullets": ["Bullet 1", "Bullet 2"],
+      "easy_mc": [{ "question": "...", "choices": ["..."], "correct_idx": 0 }],
+      "boss_open": [{ "question": "...", "reference": "..." }]
+    }
+  ]
+}
+```
+
+New syllabus materials processed by upstream pipelines (summaries, extracted prerequisite graphs, and aligned audio snippets) can be loaded into `course_material/` and registered with `curriculum_bank.py` to generate new game worlds, puzzles, and battle campaigns dynamically.

@@ -1,0 +1,4 @@
+model,parameters,epochs,best_epoch,best_test_auc,best_test_accuracy,final_train_loss,final_test_loss,total_time_sec,device,checkpoint_file,epoch_csv_file
+DKT-LSTM,232330,10,10,0.773166,0.725898,0.525589,0.541387,130.4,cuda,dkt_lstm_model.pt,dkt_lstm_training_log.csv
+DKT-GRU,178698,10,10,0.77537,0.728725,0.524458,0.53876,129.58,cuda,dkt_gru_model.pt,dkt_gru_training_log.csv
+Final-DKT-GRU,582913,23,13,0.799556,0.744306,0.453193,0.536792,124.38,cuda,best_final_gru_model.pt,final_gru_training_log.csv

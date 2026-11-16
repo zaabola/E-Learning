@@ -1,0 +1,511 @@
+{
+  "course_id": "vision_yolo_ocr",
+  "puzzles": [
+    {
+      "puzzle_id": "c0_p1",
+      "concept_id": 0,
+      "concept_title": "CNN Backbones, Stride & Feature Pyramids (FPN)",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c0_cnn_fpn.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "3x3 Convolution Filter Kernel",
+      "dino_prompt": "orange 3x3 convolution kernel grid box.",
+      "prompt": "LAB CALIBRATION C0-A: Click or drag a bounding box around the 3x3 Convolution Filter Kernel scanning the input image.",
+      "target_box": [
+        28,
+        95,
+        215,
+        365
+      ],
+      "all_regions": [
+        {
+          "label": "3x3 Convolution Filter Kernel",
+          "box": [
+            28,
+            95,
+            215,
+            365
+          ]
+        },
+        {
+          "label": "Deep Stride-32 Semantic Layer",
+          "box": [
+            250,
+            82,
+            435,
+            212
+          ]
+        },
+        {
+          "label": "Shallow Stride-8 High-Res Layer",
+          "box": [
+            250,
+            248,
+            435,
+            372
+          ]
+        },
+        {
+          "label": "1x1 Lateral Connection Bridge",
+          "box": [
+            462,
+            165,
+            572,
+            295
+          ]
+        },
+        {
+          "label": "Multi-Scale FPN Output Heads",
+          "box": [
+            596,
+            88,
+            700,
+            372
+          ]
+        }
+      ],
+      "explanation": "The 3x3 Convolution Kernel shares weights across all (H, W) positions, while the 1x1 Lateral Connection fuses shallow high-res features with upsampled deep semantic maps."
+    },
+    {
+      "puzzle_id": "c0_p2",
+      "concept_id": 0,
+      "concept_title": "CNN Backbones, Stride & Feature Pyramids (FPN)",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c0_cnn_fpn.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "1x1 Lateral Connection Bridge",
+      "dino_prompt": "green 1x1 lateral connection box.",
+      "prompt": "LAB CALIBRATION C0-B: Point to the 1x1 Lateral Connection Bridge that aligns channels and fuses top-down and shallow feature maps.",
+      "target_box": [
+        462,
+        165,
+        572,
+        295
+      ],
+      "all_regions": [
+        {
+          "label": "3x3 Convolution Filter Kernel",
+          "box": [
+            28,
+            95,
+            215,
+            365
+          ]
+        },
+        {
+          "label": "Deep Stride-32 Semantic Layer",
+          "box": [
+            250,
+            82,
+            435,
+            212
+          ]
+        },
+        {
+          "label": "Shallow Stride-8 High-Res Layer",
+          "box": [
+            250,
+            248,
+            435,
+            372
+          ]
+        },
+        {
+          "label": "1x1 Lateral Connection Bridge",
+          "box": [
+            462,
+            165,
+            572,
+            295
+          ]
+        },
+        {
+          "label": "Multi-Scale FPN Output Heads",
+          "box": [
+            596,
+            88,
+            700,
+            372
+          ]
+        }
+      ],
+      "explanation": "1x1 lateral connections match channel dimensions between shallow C3/C4 layers and upsampled deep layers before element-wise addition."
+    },
+    {
+      "puzzle_id": "c1_p1",
+      "concept_id": 1,
+      "concept_title": "Bounding Boxes, IoU & Non-Maximum Suppression (NMS)",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c1_iou_nms.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "Intersection Overlap Area (A n B)",
+      "dino_prompt": "green intersection overlap box.",
+      "prompt": "LAB CALIBRATION C1-A: Click or box the green Intersection Overlap Area (A n B) that forms the numerator of the IoU metric.",
+      "target_box": [
+        125,
+        165,
+        232,
+        305
+      ],
+      "all_regions": [
+        {
+          "label": "Intersection Overlap Area (A n B)",
+          "box": [
+            125,
+            165,
+            232,
+            305
+          ]
+        },
+        {
+          "label": "Duplicate Overlapping Ghost Boxes",
+          "box": [
+            378,
+            82,
+            535,
+            382
+          ]
+        },
+        {
+          "label": "Surviving NMS Best Bounding Box",
+          "box": [
+            568,
+            82,
+            698,
+            382
+          ]
+        }
+      ],
+      "explanation": "Intersection over Union (IoU) divides the area of the overlapping intersection (A n B) by the total union area (A u B)."
+    },
+    {
+      "puzzle_id": "c1_p2",
+      "concept_id": 1,
+      "concept_title": "Bounding Boxes, IoU & Non-Maximum Suppression (NMS)",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c1_iou_nms.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "Surviving NMS Best Bounding Box",
+      "dino_prompt": "surviving green NMS bounding box.",
+      "prompt": "LAB CALIBRATION C1-B: Point to the Surviving NMS Best Bounding Box (Score 0.96) after duplicate ghost detections are suppressed.",
+      "target_box": [
+        568,
+        82,
+        698,
+        382
+      ],
+      "all_regions": [
+        {
+          "label": "Intersection Overlap Area (A n B)",
+          "box": [
+            125,
+            165,
+            232,
+            305
+          ]
+        },
+        {
+          "label": "Duplicate Overlapping Ghost Boxes",
+          "box": [
+            378,
+            82,
+            535,
+            382
+          ]
+        },
+        {
+          "label": "Surviving NMS Best Bounding Box",
+          "box": [
+            568,
+            82,
+            698,
+            382
+          ]
+        }
+      ],
+      "explanation": "Non-Maximum Suppression (NMS) sorts boxes by confidence, keeps the highest-scoring box (0.96), and suppresses lower-scoring neighbors with high IoU."
+    },
+    {
+      "puzzle_id": "c2_p1",
+      "concept_id": 2,
+      "concept_title": "Single-Stage Real-Time Detection & YOLO Architecture",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c2_yolo_grid.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "S x S Spatial Grid & Target Center Cell",
+      "dino_prompt": "yellow S x S spatial grid box.",
+      "prompt": "LAB CALIBRATION C2-A: Click or box the S x S Spatial Grid where the cell containing the object's center (cx, cy) predicts the bounding box.",
+      "target_box": [
+        28,
+        86,
+        268,
+        376
+      ],
+      "all_regions": [
+        {
+          "label": "S x S Spatial Grid & Target Center Cell",
+          "box": [
+            28,
+            86,
+            268,
+            376
+          ]
+        },
+        {
+          "label": "CSPDarknet Backbone & PANet Neck",
+          "box": [
+            304,
+            112,
+            482,
+            352
+          ]
+        },
+        {
+          "label": "Decoupled Detection Head (Box + Class)",
+          "box": [
+            518,
+            86,
+            696,
+            376
+          ]
+        }
+      ],
+      "explanation": "YOLO divides the image into an S x S grid; the unique cell containing the object's center point (cx, cy) is responsible for predicting its bounding box."
+    },
+    {
+      "puzzle_id": "c2_p2",
+      "concept_id": 2,
+      "concept_title": "Single-Stage Real-Time Detection & YOLO Architecture",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c2_yolo_grid.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "Decoupled Detection Head (Box + Class)",
+      "dino_prompt": "purple decoupled detection head box.",
+      "prompt": "LAB CALIBRATION C2-B: Point to the Decoupled Detection Head that separates bounding-box coordinate regression from class probability prediction.",
+      "target_box": [
+        518,
+        86,
+        696,
+        376
+      ],
+      "all_regions": [
+        {
+          "label": "S x S Spatial Grid & Target Center Cell",
+          "box": [
+            28,
+            86,
+            268,
+            376
+          ]
+        },
+        {
+          "label": "CSPDarknet Backbone & PANet Neck",
+          "box": [
+            304,
+            112,
+            482,
+            352
+          ]
+        },
+        {
+          "label": "Decoupled Detection Head (Box + Class)",
+          "box": [
+            518,
+            86,
+            696,
+            376
+          ]
+        }
+      ],
+      "explanation": "Modern YOLO detectors use a decoupled head with separate convolutional branches for spatial box localization (CIoU) and semantic classification (BCE)."
+    },
+    {
+      "puzzle_id": "c3_p1",
+      "concept_id": 3,
+      "concept_title": "OCR: Scene Text Detection, CRNN & CTC Loss",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c3_crnn_ctc.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "Bidirectional LSTM (BiLSTM) Sequence Encoder",
+      "dino_prompt": "purple bidirectional LSTM sequence box.",
+      "prompt": "LAB CALIBRATION C3-A: Click or box the Bidirectional LSTM (BiLSTM) Sequence Encoder that models left-to-right and right-to-left context.",
+      "target_box": [
+        266,
+        92,
+        480,
+        372
+      ],
+      "all_regions": [
+        {
+          "label": "CNN Vertical Feature Slices",
+          "box": [
+            26,
+            92,
+            232,
+            372
+          ]
+        },
+        {
+          "label": "Bidirectional LSTM (BiLSTM) Sequence Encoder",
+          "box": [
+            266,
+            92,
+            480,
+            372
+          ]
+        },
+        {
+          "label": "CTC Blank-Token Collapse Decoder",
+          "box": [
+            514,
+            92,
+            696,
+            372
+          ]
+        }
+      ],
+      "explanation": "The Bidirectional LSTM propagates context in both directions across feature columns, helping distinguish look-alike glyphs like '0' and 'O'."
+    },
+    {
+      "puzzle_id": "c3_p2",
+      "concept_id": 3,
+      "concept_title": "OCR: Scene Text Detection, CRNN & CTC Loss",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c3_crnn_ctc.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "CTC Blank-Token Collapse Decoder",
+      "dino_prompt": "green CTC collapse decoder box.",
+      "prompt": "LAB CALIBRATION C3-B: Point to the CTC Blank-Token Collapse Decoder that merges repeated consecutive characters and strips blank tokens.",
+      "target_box": [
+        514,
+        92,
+        696,
+        372
+      ],
+      "all_regions": [
+        {
+          "label": "CNN Vertical Feature Slices",
+          "box": [
+            26,
+            92,
+            232,
+            372
+          ]
+        },
+        {
+          "label": "Bidirectional LSTM (BiLSTM) Sequence Encoder",
+          "box": [
+            266,
+            92,
+            480,
+            372
+          ]
+        },
+        {
+          "label": "CTC Blank-Token Collapse Decoder",
+          "box": [
+            514,
+            92,
+            696,
+            372
+          ]
+        }
+      ],
+      "explanation": "CTC (Connectionist Temporal Classification) collapses repeated emissions unless separated by a blank token (_), turning 'Y-Y-_-O-L-O' into 'YOLO'."
+    },
+    {
+      "puzzle_id": "c4_p1",
+      "concept_id": 4,
+      "concept_title": "End-to-End Vision Pipelines: Combining YOLO + OCR",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c4_vision_pipeline.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "ROI Crop & Perspective Rectification Stage",
+      "dino_prompt": "blue ROI crop and rectify box.",
+      "prompt": "LAB CALIBRATION C4-A: Click or box the ROI Crop & Perspective Rectification module that deskews tilted text between YOLO and OCR.",
+      "target_box": [
+        262,
+        92,
+        474,
+        372
+      ],
+      "all_regions": [
+        {
+          "label": "Stage 1: Real-Time YOLO Detector",
+          "box": [
+            24,
+            92,
+            228,
+            372
+          ]
+        },
+        {
+          "label": "ROI Crop & Perspective Rectification Stage",
+          "box": [
+            262,
+            92,
+            474,
+            372
+          ]
+        },
+        {
+          "label": "Stage 2: CRNN + CTC OCR Reader",
+          "box": [
+            508,
+            92,
+            696,
+            372
+          ]
+        }
+      ],
+      "explanation": "Between Stage 1 (YOLO detection) and Stage 2 (CRNN OCR), the ROI Crop & Rectify module deskews perspective tilt and normalizes height to H=32 without squashing aspect ratio."
+    },
+    {
+      "puzzle_id": "c4_p2",
+      "concept_id": 4,
+      "concept_title": "End-to-End Vision Pipelines: Combining YOLO + OCR",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c4_vision_pipeline.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "target_label": "Stage 2: CRNN + CTC OCR Reader",
+      "dino_prompt": "green stage 2 CRNN CTC OCR box.",
+      "prompt": "LAB CALIBRATION C4-B: Point to Stage 2: CRNN + CTC OCR Reader, which decodes the character sequence and multiplies YOLO x OCR confidence.",
+      "target_box": [
+        508,
+        92,
+        696,
+        372
+      ],
+      "all_regions": [
+        {
+          "label": "Stage 1: Real-Time YOLO Detector",
+          "box": [
+            24,
+            92,
+            228,
+            372
+          ]
+        },
+        {
+          "label": "ROI Crop & Perspective Rectification Stage",
+          "box": [
+            262,
+            92,
+            474,
+            372
+          ]
+        },
+        {
+          "label": "Stage 2: CRNN + CTC OCR Reader",
+          "box": [
+            508,
+            92,
+            696,
+            372
+          ]
+        }
+      ],
+      "explanation": "Decoupling Stage 1 (YOLO localization) from Stage 2 (CRNN sequence decoding) prevents running expensive OCR over 98% background pixels."
+    }
+  ]
+}

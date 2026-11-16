@@ -1,0 +1,11 @@
+puzzle_id,concept_id,target_label,dino_confidence,center_click_verdict,center_click_score,drag_box_verdict,drag_box_iou,distractor_click_verdict,distractor_clicked_region,dino_latency_ms
+c0_p1,0,3x3 Convolution Filter Kernel,0.425,correct,0.99,correct,0.908,incorrect,Deep Stride-32 Semantic Layer,526.95
+c0_p2,0,1x1 Lateral Connection Bridge,0.535,correct,0.99,correct,0.8322,incorrect,3x3 Convolution Filter Kernel,518.71
+c1_p1,1,Intersection Overlap Area (A n B),0.3441,correct,0.99,correct,0.8353,incorrect,Duplicate Overlapping Ghost Boxes,526.56
+c1_p2,1,Surviving NMS Best Bounding Box,0.4715,correct,0.99,correct,0.8892,incorrect,Intersection Overlap Area (A n B),525.27
+c2_p1,2,S x S Spatial Grid & Target Center Cell,0.4656,correct,0.99,correct,0.922,incorrect,CSPDarknet Backbone & PANet Neck,517.83
+c2_p2,2,Decoupled Detection Head (Box + Class),0.3724,correct,0.99,correct,0.908,incorrect,S x S Spatial Grid & Target Center Cell,522.44
+c3_p1,3,Bidirectional LSTM (BiLSTM) Sequence Encoder,0.5752,correct,0.99,correct,0.9158,incorrect,CNN Vertical Feature Slices,522.18
+c3_p2,3,CTC Blank-Token Collapse Decoder,0.5989,correct,0.99,correct,0.9079,incorrect,CNN Vertical Feature Slices,521.69
+c4_p1,4,ROI Crop & Perspective Rectification Stage,0.4127,correct,0.99,correct,0.9154,incorrect,Stage 1: Real-Time YOLO Detector,521.31
+c4_p2,4,Stage 2: CRNN + CTC OCR Reader,0.3834,correct,0.99,correct,0.9096,incorrect,Stage 1: Real-Time YOLO Detector,526.2

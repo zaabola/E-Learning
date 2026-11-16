@@ -1,0 +1,93 @@
+==========================================================================================
+   FORENSIC AFFECTIVE & BEHAVIORAL EDA - ASSISTMENTS 2012-2013 (RL CALIBRATION)   
+==========================================================================================
+Dataset Path : C:\Users\zaabola\Desktop\DL-Interactive_L\Models\DKT\data\2012-2013-data-with-predictions-4-final.csv
+Output Folder: C:\Users\zaabola\Desktop\DL-Interactive_L\Models\RL\eda_results
+
+[1/4] Streaming 2.80 GB CSV in chunks of 300,000 rows...
+      ... processed 1,500,000 rows (12.1s)
+      ... processed 3,000,000 rows (24.5s)
+      ... processed 4,500,000 rows (37.2s)
+      ... processed 6,000,000 rows (50.0s)
+      Finished streaming 6,123,270 total rows in 51.1s.
+
+[2/4] Complete 35-Column Schema & Missing / Null Audit:
+#   | Column Name                          | Type     | Null Count  | Null % 
+------------------------------------------------------------------------------
+1   | problem_log_id                       | int64    | 0           |   0.00%
+2   | skill                                | object   | 3,493,190   |  57.05%
+3   | problem_id                           | int64    | 0           |   0.00%
+4   | user_id                              | int64    | 0           |   0.00%
+5   | assignment_id                        | int64    | 0           |   0.00%
+6   | assistment_id                        | int64    | 0           |   0.00%
+7   | start_time                           | object   | 0           |   0.00%
+8   | end_time                             | object   | 0           |   0.00%
+9   | problem_type                         | object   | 0           |   0.00%
+10  | original                             | int64    | 0           |   0.00%
+11  | correct                              | int64    | 0           |   0.00%
+12  | bottom_hint                          | int64    | 60,348      |   0.99%
+13  | hint_count                           | int64    | 0           |   0.00%
+14  | actions                              | object   | 0           |   0.00%
+15  | attempt_count                        | int64    | 0           |   0.00%
+16  | ms_first_response                    | int64    | 0           |   0.00%
+17  | tutor_mode                           | object   | 0           |   0.00%
+18  | sequence_id                          | int64    | 0           |   0.00%
+19  | student_class_id                     | int64    | 0           |   0.00%
+20  | position                             | int64    | 0           |   0.00%
+21  | type                                 | object   | 0           |   0.00%
+22  | base_sequence_id                     | int64    | 0           |   0.00%
+23  | skill_id                             | float64  | 3,411,457   |  55.71%
+24  | teacher_id                           | int64    | 0           |   0.00%
+25  | school_id                            | int64    | 157         |   0.00%
+26  | overlap_time                         | int64    | 0           |   0.00%
+27  | template_id                          | int64    | 0           |   0.00%
+28  | answer_id                            | float64  | 6,114,995   |  99.86%
+29  | answer_text                          | object   | 346,500     |   5.66%
+30  | first_action                         | int64    | 0           |   0.00%
+31  | problemlogid                         | int64    | 0           |   0.00%
+32  | Average_confidence(FRUSTRATED)       | float64  | 0           |   0.00%
+33  | Average_confidence(CONFUSED)         | float64  | 0           |   0.00%
+34  | Average_confidence(CONCENTRATING)    | float64  | 0           |   0.00%
+35  | Average_confidence(BORED)            | float64  | 0           |   0.00%
+
+[3/4] Behavioral Hygiene & Affective State Distributions:
+  - Total Raw Rows                   : 6,123,270
+  - Valid Binary + Affective Rows    : 6,117,947 (99.91%)
+  - Non-Binary Correctness Rows      : 5,323
+  - Negative Response Time (<0 ms)   : 13
+  - Zero Response Time (0 ms)        : 0
+  - Abandoned Tabs (>1 hour)         : 240
+  - Zero-Attempt Rows (Hint 1st)     : 46,570
+  - Spam Retries (>10 attempts)      : 10,676 (Max = 29)
+  - Interactions Using Hints         : 846,783 (13.83%)
+  - Bottom-Out Hint Taken            : 727,852 (11.89%)
+
+--- GLOBAL EMPIRICAL AFFECTIVE CONFIDENCE (N = 6,117,947) ---
+  CONCENTRATING   : Mean = 0.6824 | Std = 0.1713
+  FRUSTRATED      : Mean = 0.3895 | Std = 0.1027
+  CONFUSED        : Mean = 0.0448 | Std = 0.1925
+  BORED           : Mean = 0.2568 | Std = 0.2862
+
+--- AFFECTIVE STATE BY STUDENT OUTCOME ---
+Outcome Category         | Rows        | Concentrating | Frustrated  | Confused   | Bored   
+----------------------------------------------------------------------------------------
+correct_no_hint          | 4,140,656   | 0.6993        | 0.3911      | 0.0476     | 0.2349  
+correct_with_hint        | 908         | 0.7016        | 0.3877      | 0.0352     | 0.3446  
+wrong_1_try              | 819,714     | 0.6515        | 0.3890      | 0.0421     | 0.2793  
+wrong_multi_retry        | 1,156,669   | 0.6438        | 0.3838      | 0.0365     | 0.3192  
+
+--- AFFECTIVE STATE BY RESPONSE LATENCY ZONE ---
+Latency Zone             | Rows        | Concentrating | Frustrated  | Confused   | Bored   
+----------------------------------------------------------------------------------------
+rapid_<5s                | 598,306     | 0.7215        | 0.3934      | 0.0377     | 0.2346  
+flow_5_15s               | 1,746,176   | 0.7023        | 0.3920      | 0.0698     | 0.2357  
+deliberate_15_60s        | 2,378,499   | 0.6746        | 0.3889      | 0.0430     | 0.2618  
+struggle_>60s            | 1,394,966   | 0.6541        | 0.3854      | 0.0196     | 0.2843  
+
+[4/4] Generating visualizations and exporting affective_calibration.json...
+
+[SUCCESS] Registered all RL Affective EDA outputs in: C:\Users\zaabola\Desktop\DL-Interactive_L\Models\RL\eda_results
+  1. Text Report           -> C:\Users\zaabola\Desktop\DL-Interactive_L\Models\RL\eda_results\eda_affective_report.txt
+  2. RL Calibration JSON   -> C:\Users\zaabola\Desktop\DL-Interactive_L\Models\RL\eda_results\affective_calibration.json
+  3. Visual Dashboard PNG  -> C:\Users\zaabola\Desktop\DL-Interactive_L\Models\RL\eda_results\eda_affective_visualizations.png
+==========================================================================================

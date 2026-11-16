@@ -1,0 +1,567 @@
+{
+  "dataset": "2012-2013-data-with-predictions-4-final.csv",
+  "total_raw_rows": 6123270,
+  "valid_affect_rows": 6117947,
+  "anomalies": {
+    "non_binary_correct": 5323,
+    "negative_response_time": 13,
+    "zero_response_time": 0,
+    "over_1hr_response_time": 240,
+    "zero_attempts_hint_first": 46570,
+    "over_10_attempts": 10676,
+    "max_attempts": 29,
+    "hints_used_rows": 846783,
+    "bottom_hint_rows": 727852
+  },
+  "global_affect": {
+    "concentrating": {
+      "mean": 0.68242,
+      "std": 0.17135
+    },
+    "frustrated": {
+      "mean": 0.38945,
+      "std": 0.10275
+    },
+    "confused": {
+      "mean": 0.0448,
+      "std": 0.19249
+    },
+    "bored": {
+      "mean": 0.25682,
+      "std": 0.28623
+    }
+  },
+  "by_outcome": {
+    "correct_no_hint": {
+      "count": 4140656,
+      "concentrating": 0.69934,
+      "frustrated": 0.39111,
+      "confused": 0.04765,
+      "bored": 0.23491
+    },
+    "correct_with_hint": {
+      "count": 908,
+      "concentrating": 0.70164,
+      "frustrated": 0.38768,
+      "confused": 0.03523,
+      "bored": 0.34457
+    },
+    "wrong_1_try": {
+      "count": 819714,
+      "concentrating": 0.65145,
+      "frustrated": 0.38899,
+      "confused": 0.04212,
+      "bored": 0.27934
+    },
+    "wrong_multi_retry": {
+      "count": 1156669,
+      "concentrating": 0.64378,
+      "frustrated": 0.38384,
+      "confused": 0.03653,
+      "bored": 0.31922
+    }
+  },
+  "by_latency_zone": {
+    "rapid_<5s": {
+      "count": 598306,
+      "concentrating": 0.72152,
+      "frustrated": 0.39343,
+      "confused": 0.03772,
+      "bored": 0.2346
+    },
+    "flow_5_15s": {
+      "count": 1746176,
+      "concentrating": 0.70231,
+      "frustrated": 0.39199,
+      "confused": 0.06982,
+      "bored": 0.23574
+    },
+    "deliberate_15_60s": {
+      "count": 2378499,
+      "concentrating": 0.67458,
+      "frustrated": 0.38893,
+      "confused": 0.04302,
+      "bored": 0.26176
+    },
+    "struggle_>60s": {
+      "count": 1394966,
+      "concentrating": 0.65412,
+      "frustrated": 0.38545,
+      "confused": 0.01957,
+      "bored": 0.28432
+    }
+  },
+  "calibration_grid": {
+    "c0_deliberate_15_60s_h0_r0": {
+      "count": 194295,
+      "concentrating": 0.65268,
+      "frustrated": 0.38528,
+      "confused": 0.04659,
+      "bored": 0.25531
+    },
+    "c0_deliberate_15_60s_h0_r1": {
+      "count": 240220,
+      "concentrating": 0.63639,
+      "frustrated": 0.37973,
+      "confused": 0.03673,
+      "bored": 0.30358
+    },
+    "c0_deliberate_15_60s_h1_r0": {
+      "count": 69424,
+      "concentrating": 0.60742,
+      "frustrated": 0.39582,
+      "confused": 0.03725,
+      "bored": 0.3455
+    },
+    "c0_deliberate_15_60s_h1_r1": {
+      "count": 233109,
+      "concentrating": 0.63483,
+      "frustrated": 0.38863,
+      "confused": 0.03314,
+      "bored": 0.34035
+    },
+    "c0_flow_5_15s_h0_r0": {
+      "count": 132170,
+      "concentrating": 0.67526,
+      "frustrated": 0.38883,
+      "confused": 0.07102,
+      "bored": 0.2249
+    },
+    "c0_flow_5_15s_h0_r1": {
+      "count": 160764,
+      "concentrating": 0.66777,
+      "frustrated": 0.38097,
+      "confused": 0.05926,
+      "bored": 0.28644
+    },
+    "c0_flow_5_15s_h1_r0": {
+      "count": 63406,
+      "concentrating": 0.62751,
+      "frustrated": 0.3958,
+      "confused": 0.049,
+      "bored": 0.34507
+    },
+    "c0_flow_5_15s_h1_r1": {
+      "count": 112604,
+      "concentrating": 0.66709,
+      "frustrated": 0.38592,
+      "confused": 0.05993,
+      "bored": 0.32664
+    },
+    "c0_rapid_<5s_h0_r0": {
+      "count": 78494,
+      "concentrating": 0.70279,
+      "frustrated": 0.39057,
+      "confused": 0.04563,
+      "bored": 0.20587
+    },
+    "c0_rapid_<5s_h0_r1": {
+      "count": 44152,
+      "concentrating": 0.70972,
+      "frustrated": 0.38049,
+      "confused": 0.04405,
+      "bored": 0.27564
+    },
+    "c0_rapid_<5s_h1_r0": {
+      "count": 75728,
+      "concentrating": 0.67549,
+      "frustrated": 0.39376,
+      "confused": 0.03455,
+      "bored": 0.34411
+    },
+    "c0_rapid_<5s_h1_r1": {
+      "count": 23082,
+      "concentrating": 0.6959,
+      "frustrated": 0.38354,
+      "confused": 0.03693,
+      "bored": 0.32334
+    },
+    "c0_struggle_>60s_h0_r0": {
+      "count": 148007,
+      "concentrating": 0.64162,
+      "frustrated": 0.38149,
+      "confused": 0.02132,
+      "bored": 0.27904
+    },
+    "c0_struggle_>60s_h0_r1": {
+      "count": 132406,
+      "concentrating": 0.62551,
+      "frustrated": 0.37742,
+      "confused": 0.01963,
+      "bored": 0.31653
+    },
+    "c0_struggle_>60s_h1_r0": {
+      "count": 58190,
+      "concentrating": 0.5964,
+      "frustrated": 0.39693,
+      "confused": 0.01791,
+      "bored": 0.34832
+    },
+    "c0_struggle_>60s_h1_r1": {
+      "count": 210332,
+      "concentrating": 0.62327,
+      "frustrated": 0.3891,
+      "confused": 0.01916,
+      "bored": 0.34516
+    },
+    "c1_deliberate_15_60s_h0_r0": {
+      "count": 1640467,
+      "concentrating": 0.69125,
+      "frustrated": 0.39046,
+      "confused": 0.04517,
+      "bored": 0.24164
+    },
+    "c1_deliberate_15_60s_h0_r1": {
+      "count": 546,
+      "concentrating": 0.6661,
+      "frustrated": 0.37768,
+      "confused": 0.04917,
+      "bored": 0.31126
+    },
+    "c1_deliberate_15_60s_h1_r0": {
+      "count": 420,
+      "concentrating": 0.71232,
+      "frustrated": 0.38911,
+      "confused": 0.04017,
+      "bored": 0.3736
+    },
+    "c1_deliberate_15_60s_h1_r1": {
+      "count": 18,
+      "concentrating": 0.74301,
+      "frustrated": 0.36132,
+      "confused": 0.0228,
+      "bored": 0.27251
+    },
+    "c1_flow_5_15s_h0_r0": {
+      "count": 1276561,
+      "concentrating": 0.71626,
+      "frustrated": 0.39405,
+      "confused": 0.07294,
+      "bored": 0.21699
+    },
+    "c1_flow_5_15s_h0_r1": {
+      "count": 398,
+      "concentrating": 0.71883,
+      "frustrated": 0.38344,
+      "confused": 0.05454,
+      "bored": 0.28681
+    },
+    "c1_flow_5_15s_h1_r0": {
+      "count": 249,
+      "concentrating": 0.73812,
+      "frustrated": 0.39315,
+      "confused": 0.02684,
+      "bored": 0.32984
+    },
+    "c1_flow_5_15s_h1_r1": {
+      "count": 24,
+      "concentrating": 0.69146,
+      "frustrated": 0.37066,
+      "confused": 0.13557,
+      "bored": 0.44746
+    },
+    "c1_rapid_<5s_h0_r0": {
+      "count": 376735,
+      "concentrating": 0.73762,
+      "frustrated": 0.39609,
+      "confused": 0.03602,
+      "bored": 0.20831
+    },
+    "c1_rapid_<5s_h0_r1": {
+      "count": 96,
+      "concentrating": 0.72988,
+      "frustrated": 0.37536,
+      "confused": 0.00968,
+      "bored": 0.28057
+    },
+    "c1_rapid_<5s_h1_r0": {
+      "count": 16,
+      "concentrating": 0.74003,
+      "frustrated": 0.38718,
+      "confused": 0.07554,
+      "bored": 0.21024
+    },
+    "c1_rapid_<5s_h1_r1": {
+      "count": 3,
+      "concentrating": 0.76692,
+      "frustrated": 0.36132,
+      "confused": 0.06561,
+      "bored": 0.4394
+    },
+    "c1_struggle_>60s_h0_r0": {
+      "count": 845430,
+      "concentrating": 0.67246,
+      "frustrated": 0.38571,
+      "confused": 0.01947,
+      "bored": 0.26064
+    },
+    "c1_struggle_>60s_h0_r1": {
+      "count": 423,
+      "concentrating": 0.62791,
+      "frustrated": 0.37739,
+      "confused": 0.02196,
+      "bored": 0.32809
+    },
+    "c1_struggle_>60s_h1_r0": {
+      "count": 166,
+      "concentrating": 0.62785,
+      "frustrated": 0.37725,
+      "confused": 0.02027,
+      "bored": 0.30388
+    },
+    "c1_struggle_>60s_h1_r1": {
+      "count": 12,
+      "concentrating": 0.48273,
+      "frustrated": 0.44914,
+      "confused": 0.0,
+      "bored": 0.25499
+    }
+  },
+  "schema_audit": [
+    {
+      "index": 1,
+      "column": "problem_log_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 2,
+      "column": "skill",
+      "dtype": "object",
+      "null_count": 3493190,
+      "null_pct": 57.048
+    },
+    {
+      "index": 3,
+      "column": "problem_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 4,
+      "column": "user_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 5,
+      "column": "assignment_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 6,
+      "column": "assistment_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 7,
+      "column": "start_time",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 8,
+      "column": "end_time",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 9,
+      "column": "problem_type",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 10,
+      "column": "original",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 11,
+      "column": "correct",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 12,
+      "column": "bottom_hint",
+      "dtype": "int64",
+      "null_count": 60348,
+      "null_pct": 0.986
+    },
+    {
+      "index": 13,
+      "column": "hint_count",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 14,
+      "column": "actions",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 15,
+      "column": "attempt_count",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 16,
+      "column": "ms_first_response",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 17,
+      "column": "tutor_mode",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 18,
+      "column": "sequence_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 19,
+      "column": "student_class_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 20,
+      "column": "position",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 21,
+      "column": "type",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 22,
+      "column": "base_sequence_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 23,
+      "column": "skill_id",
+      "dtype": "float64",
+      "null_count": 3411457,
+      "null_pct": 55.713
+    },
+    {
+      "index": 24,
+      "column": "teacher_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 25,
+      "column": "school_id",
+      "dtype": "int64",
+      "null_count": 157,
+      "null_pct": 0.003
+    },
+    {
+      "index": 26,
+      "column": "overlap_time",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 27,
+      "column": "template_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 28,
+      "column": "answer_id",
+      "dtype": "float64",
+      "null_count": 6114995,
+      "null_pct": 99.865
+    },
+    {
+      "index": 29,
+      "column": "answer_text",
+      "dtype": "object",
+      "null_count": 346500,
+      "null_pct": 5.659
+    },
+    {
+      "index": 30,
+      "column": "first_action",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 31,
+      "column": "problemlogid",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 32,
+      "column": "Average_confidence(FRUSTRATED)",
+      "dtype": "float64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 33,
+      "column": "Average_confidence(CONFUSED)",
+      "dtype": "float64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 34,
+      "column": "Average_confidence(CONCENTRATING)",
+      "dtype": "float64",
+      "null_count": 0,
+      "null_pct": 0.0
+    },
+    {
+      "index": 35,
+      "column": "Average_confidence(BORED)",
+      "dtype": "float64",
+      "null_count": 0,
+      "null_pct": 0.0
+    }
+  ]
+}

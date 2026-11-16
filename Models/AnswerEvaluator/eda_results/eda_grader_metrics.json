@@ -1,0 +1,94 @@
+{
+  "total_rows": 99631,
+  "train_rows": 77159,
+  "test_rows": 22472,
+  "source_counts": {
+    "MultiNLI_MultiDomain": 41000,
+    "Google_PAWS_Adversarial": 34000,
+    "SciEntsBank_ASAG": 10804,
+    "STS_Benchmark": 8628,
+    "Beetle_Tutor_ASAG": 5199
+  },
+  "grade_label_counts": {
+    "correct": 38358,
+    "partial": 20384,
+    "incorrect": 40889
+  },
+  "binary_correct_rate": 0.385,
+  "p99_combined_words": 121.0,
+  "naive_keyword_baseline_accuracy": 0.5996,
+  "schema_audit": [
+    {
+      "column": "pair_id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 99631,
+      "description": "Unique integer identifier for each grading pair"
+    },
+    {
+      "column": "source",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 5,
+      "description": "Origin benchmark corpus (Student ASAG, MultiNLI, PAWS, STS-B)"
+    },
+    {
+      "column": "split",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 2,
+      "description": "Leak-free partition (`train` vs `test`)"
+    },
+    {
+      "column": "question",
+      "dtype": "object",
+      "null_count": 83628,
+      "null_pct": 83.938,
+      "unique_count": 237,
+      "description": "Optional prompt context (populated for classroom ASAG items)"
+    },
+    {
+      "column": "reference_answer",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 70200,
+      "description": "Ground-truth concept summary / reference explanation"
+    },
+    {
+      "column": "student_answer",
+      "dtype": "object",
+      "null_count": 4,
+      "null_pct": 0.004,
+      "unique_count": 89755,
+      "description": "Student typed explanation / candidate response"
+    },
+    {
+      "column": "grade_label",
+      "dtype": "object",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 3,
+      "description": "3-way pedagogical verdict (`correct`, `partial`, `incorrect`)"
+    },
+    {
+      "column": "binary_correct",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 2,
+      "description": "Binary correctness {0, 1} fed back into Final-DKT-GRU"
+    },
+    {
+      "column": "semantic_score",
+      "dtype": "float64",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 90,
+      "description": "Continuous [0.0, 1.0] score scaling RPG Battle Attack Damage"
+    }
+  ]
+}

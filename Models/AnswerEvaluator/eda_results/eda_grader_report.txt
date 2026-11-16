@@ -1,0 +1,62 @@
+==========================================================================================
+   FORENSIC EDA - SEMANTIC SHORT-ANSWER EVALUATOR MASTER DATASET   
+==========================================================================================
+Dataset Path : C:\Users\zaabola\Desktop\DL-Interactive_L\Models\AnswerEvaluator\data\master_answer_grading.csv
+Output Folder: C:\Users\zaabola\Desktop\DL-Interactive_L\Models\AnswerEvaluator\eda_results
+
+[1/6] Loading master dataset into memory...
+      Total Grading Pairs : 99,631
+      Total Columns       : 9
+
+[2/6] Complete Schema & Null Value Audit:
+#   | Column Name        | Type     | Nulls     | Null %  | Unique    | Description
+----------------------------------------------------------------------------------------------------------------
+1   | pair_id            | int64    | 0         |  0.00% | 99,631    | Unique integer identifier for each grading pair
+2   | source             | object   | 0         |  0.00% | 5         | Origin benchmark corpus (Student ASAG, MultiNLI, PAWS, STS-B)
+3   | split              | object   | 0         |  0.00% | 2         | Leak-free partition (`train` vs `test`)
+4   | question           | object   | 83,628    | 83.94% | 237       | Optional prompt context (populated for classroom ASAG items)
+5   | reference_answer   | object   | 0         |  0.00% | 70,200    | Ground-truth concept summary / reference explanation
+6   | student_answer     | object   | 4         |  0.00% | 89,755    | Student typed explanation / candidate response
+7   | grade_label        | object   | 0         |  0.00% | 3         | 3-way pedagogical verdict (`correct`, `partial`, `incorrect`)
+8   | binary_correct     | int64    | 0         |  0.00% | 2         | Binary correctness {0, 1} fed back into Final-DKT-GRU
+9   | semantic_score     | float64  | 0         |  0.00% | 90        | Continuous [0.0, 1.0] score scaling RPG Battle Attack Damage
+      Note: `question` is populated on classroom Q&A rows and optional ('') on direct statement pairs.
+
+[3/6] Source Corpus & Partition Breakdown:
+split                    test  train  Total
+source                                     
+Beetle_Tutor_ASAG        1258   3941   5199
+Google_PAWS_Adversarial  8000  26000  34000
+MultiNLI_MultiDomain     6000  35000  41000
+STS_Benchmark            1379   7249   8628
+SciEntsBank_ASAG         5835   4969  10804
+
+[4/6] Pedagogical Label & Score Distributions:
+      CORRECT      :   38,358 (38.50%)
+      PARTIAL      :   20,384 (20.46%)
+      INCORRECT    :   40,889 (41.04%)
+
+      Binary Correct (1)   : 38,358 (38.50%)
+      Binary Incorrect (0) : 61,273 (61.50%)
+
+[5/6] Data Hygiene & Forensic Keyword-Trap Analysis:
+      - Empty Reference Answers         : 0
+      - Empty Student Answers           : 0
+      - Out-of-Range Scores (<0 or >1)  : 0
+      - Duplicate (Ref, Student) Pairs  : 652
+      - Median Reference Length         : 17 words (95th %: 35)
+      - Median Student Answer Length    : 12 words (95th %: 28)
+      - 99th % Combined Pair Words      : 121 words -> `max_length = 160` subword tokens covers >99.5% without truncation!
+
+      --- WHY KEYWORD MATCHING FAILS IN KNOWLEDGEQUEST ---
+      - Naive 50%-Keyword-Overlap Baseline Accuracy : 59.96% (Barely above coin flip!)
+      - High-Overlap (>=70% same words) BUT WRONG   : 5,814 traps in sample (negations & word-swaps)
+      - Low-Overlap (<=35% shared words) BUT RIGHT  : 4,132 paraphrases in sample (true understanding)
+
+[6/6] Generating 4-panel visual dashboard & exporting JSON...
+
+[SUCCESS] Registered Answer Evaluator EDA outputs in: C:\Users\zaabola\Desktop\DL-Interactive_L\Models\AnswerEvaluator\eda_results
+  1. Text Report    -> C:\Users\zaabola\Desktop\DL-Interactive_L\Models\AnswerEvaluator\eda_results\eda_grader_report.txt
+  2. JSON Metrics   -> C:\Users\zaabola\Desktop\DL-Interactive_L\Models\AnswerEvaluator\eda_results\eda_grader_metrics.json
+  3. Visual Charts  -> C:\Users\zaabola\Desktop\DL-Interactive_L\Models\AnswerEvaluator\eda_results\eda_grader_visualizations.png
+==========================================================================================

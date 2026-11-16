@@ -1,0 +1,1623 @@
+// ===== WILDVALE — input + UI layer (dialog, menus, screens, battle HUD) =====
+
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1)); // inclusive
+
+// ---------------- Input ----------------
+const Input = (() => {
+  const held = {};
+  const pressed = {};
+  const listeners = [];
+
+  function mapKey(key) {
+    switch (key) {
+      case 'ArrowUp': case 'w': case 'W': return 'up';
+      case 'ArrowDown': case 's': case 'S': return 'down';
+      case 'ArrowLeft': case 'a': case 'A': return 'left';
+      case 'ArrowRight': case 'd': case 'D': return 'right';
+      case 'z': case 'Z': case ' ': return 'a';
+      case 'x': case 'X': case 'Escape': case 'Backspace': return 'b';
+      case 'Enter': return 'start';
+      case 'm': case 'M': return 'mute';
+      default: return null;
+    }
+  }
+
+  // Shared entry point for keyboard AND touch controls — both produce the
+  // exact same press/release semantics (held state + one-shot dispatch).
+  function press(name) {
+    held[name] = true;
+    Sfx.unlock();
+    if (name === 'mute') { UI.toast(Sfx.toggle() ? 'SOUND: ON' : 'SOUND: OFF'); return; }
+    // A waiting async flow consumes the press first.
+    for (let i = 0; i < listeners.length; i++) {
+      const li = listeners[i];
+      if (!li.keys || li.keys.includes(name)) {
+        listeners.splice(i, 1);
+        li.resolve(name);
+        return;
+      }
+    }
+    pressed[name] = true;
+  }
+  function release(name) {
+    held[name] = false;
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target && e.target.tagName === 'TEXTAREA' && e.key !== 'Escape') return;
+    const name = mapKey(e.key);
+    if (!name) return;
+    e.preventDefault();
+    if (e.repeat) { held[name] = true; return; }
+    press(name);
+  });
+  window.addEventListener('keyup', (e) => {
+    const name = mapKey(e.key);
+    if (name) release(name);
+  });
+
+  return {
+    held,
+    dirHeld() {
+      for (const d of ['up', 'down', 'left', 'right']) if (held[d]) return d;
+      return null;
+    },
+    consume(name) {
+      if (pressed[name]) { pressed[name] = false; return true; }
+      return false;
+    },
+    clearPressed() { for (const k of Object.keys(pressed)) pressed[k] = false; },
+    waitButton(...keys) {
+      return new Promise(resolve => listeners.push({ keys: keys.length ? keys : null, resolve }));
+    },
+    // Register a one-shot listener; returns an unsubscribe function.
+    listen(keys, cb) {
+      const li = { keys, resolve: cb };
+      listeners.push(li);
+      return () => { const i = listeners.indexOf(li); if (i >= 0) listeners.splice(i, 1); };
+    },
+    // Touch-control entry points (same semantics as keydown/keyup).
+    press, release,
+  };
+})();
+
+// ---------------- UI ----------------
+const UI = (() => {
+  const $ = id => document.getElementById(id);
+  let dlg, dlgText, dlgArrow, dlgPortraitWrap, dlgPortrait, dlgName, menuLayer, fadeEl;
+
+  function init() {
+    dlg = $('dialog'); dlgText = $('dialog-text'); dlgArrow = $('dialog-arrow');
+    dlgPortraitWrap = $('dialog-portrait-wrap');
+    dlgPortrait = $('dialog-portrait');
+    dlgName = $('dialog-name');
+    menuLayer = $('menu-layer'); fadeEl = $('fade');
+  }
+
+  // Speaker profile map for portraits and badges (Pokemon Void visual reference)
+  const SPEAKER_PROFILES = {
+    'MAPLE': { name: 'Prof. Ada', portrait: 'assets/portraits/prof.png' },
+    'PROF': { name: 'Prof. Ada', portrait: 'assets/portraits/prof.png' },
+    'ADA': { name: 'Prof. Ada', portrait: 'assets/portraits/prof.png' },
+    'MOM': { name: 'Mom', portrait: 'assets/portraits/mom.png' },
+    'REX': { name: 'Rex', portrait: 'assets/portraits/rival.png' },
+    'NURSE': { name: 'Nurse Joy', portrait: 'assets/portraits/nurse.png' },
+    'CLERK': { name: 'Shop Clerk', portrait: 'assets/portraits/seren.png' },
+    'LIN': { name: 'Technician Lin', portrait: 'assets/portraits/nia.png' },
+    'RIVAL_MOM': { name: "Rex's Mother", portrait: 'assets/portraits/rival_mom.png' },
+    'MOTHER': { name: "Rex's Mother", portrait: 'assets/portraits/rival_mom.png' },
+    'DAISY': { name: "Rex's Mother", portrait: 'assets/portraits/rival_mom.png' },
+  };
+
+  // Creature thumbnail: real front sprite if loaded, else the drawn fallback.
+  function creatureThumb(species, px, shiny) {
+    const img = GameAssets.frontFor(species, shiny);
+    if (img) {
+      const el = document.createElement('img');
+      el.src = img.src;
+      el.style.cssText = `width:${px}px;height:${px}px;image-rendering:pixelated;object-fit:contain`;
+      return el;
+    }
+    const cv = document.createElement('canvas');
+    cv.width = 16; cv.height = 16;
+    cv.getContext('2d').drawImage(Sprites.creature(species), 0, 0);
+    cv.style.cssText = `width:${px}px;height:${px}px;image-rendering:pixelated`;
+    return cv;
+  }
+
+  // Item icon HTML (empty string when no icon is available).
+  function itemIconHtml(itemId) {
+    const url = GameAssets.itemIconUrl(itemId);
+    return url ? `<img src="${url}" class="item-icon" onerror="this.remove()" alt="">` : '';
+  }
+
+  // ----- dialog / typewriter -----
+  async function say(rawText, opts = {}) {
+    dlg.classList.remove('hidden');
+    dlgArrow.classList.add('hidden');
+    
+    let displayText = rawText;
+    let speakerName = opts.name || null;
+    let speakerPortrait = opts.portrait || null;
+    
+    // Automatically detect Speaker tag (e.g. "MAPLE: Welcome to Netoria!")
+    const prefixMatch = rawText.match(/^([A-Za-z0-9_]+):\s*([\s\S]*)$/);
+    if (prefixMatch) {
+      const tag = prefixMatch[1].toUpperCase();
+      if (SPEAKER_PROFILES[tag]) {
+        speakerName = speakerName || SPEAKER_PROFILES[tag].name;
+        speakerPortrait = speakerPortrait || SPEAKER_PROFILES[tag].portrait;
+        displayText = prefixMatch[2];
+      }
+    }
+    
+    if (speakerPortrait && dlgPortrait && dlgPortraitWrap) {
+      dlgPortrait.src = speakerPortrait;
+      dlgPortraitWrap.classList.remove('hidden');
+    } else if (dlgPortraitWrap) {
+      dlgPortraitWrap.classList.add('hidden');
+    }
+    
+    if (speakerName && dlgName) {
+      dlgName.textContent = speakerName;
+      dlgName.classList.remove('hidden');
+    } else if (dlgName) {
+      dlgName.classList.add('hidden');
+    }
+
+    dlgText.textContent = '';
+    let i = 0, skipped = false;
+    const unsub = Input.listen(['a', 'b', 'start'], () => { skipped = true; });
+    while (i < displayText.length) {
+      if (skipped) { dlgText.textContent = displayText; break; }
+      i += 2;
+      dlgText.textContent = displayText.slice(0, i);
+      if (i % 6 === 0) Sfx.blip();
+      await wait(24);
+    }
+    unsub();
+    if (opts.noWait) { if (!opts.keep) hideDialog(); return; }
+    dlgArrow.classList.remove('hidden');
+    await Input.waitButton('a', 'b', 'start');
+    Sfx.select();
+    dlgArrow.classList.add('hidden');
+    if (!opts.keep) hideDialog();
+  }
+
+  async function sayLines(lines, opts = {}) {
+    for (let i = 0; i < lines.length; i++) {
+      await say(lines[i], { keep: opts.keep || i < lines.length - 1 });
+    }
+  }
+
+  function setPrompt(text) {
+    dlg.classList.remove('hidden');
+    dlgArrow.classList.add('hidden');
+    if (dlgPortraitWrap) dlgPortraitWrap.classList.add('hidden');
+    if (dlgName) dlgName.classList.add('hidden');
+    dlgText.textContent = text;
+  }
+
+  function hideDialog() {
+    dlg.classList.add('hidden');
+    dlgText.textContent = '';
+    dlgArrow.classList.add('hidden');
+    if (dlgPortraitWrap) dlgPortraitWrap.classList.add('hidden');
+    if (dlgName) dlgName.classList.add('hidden');
+  }
+
+  // ----- generic menu -----
+  // options: array of strings (or {label, dim}). opts: {style, cols, canCancel, startIdx}
+  async function choose(options, opts = {}) {
+    const box = document.createElement('div');
+    box.className = 'menu gba-box' + (opts.cols === 2 ? ' grid-menu' : '');
+    Object.assign(box.style, opts.style || { right: '14px', bottom: '126px' });
+    const items = options.map(o => {
+      const d = document.createElement('div');
+      d.className = 'mi' + ((o && o.dim) ? ' dim' : '');
+      d.textContent = typeof o === 'string' ? o : o.label;
+      box.appendChild(d);
+      return d;
+    });
+    menuLayer.appendChild(box);
+    let idx = opts.startIdx || 0;
+    const cols = opts.cols || 1;
+    const paint = () => items.forEach((d, i) => d.classList.toggle('sel', i === idx));
+    paint();
+    try {
+      while (true) {
+        const k = await Input.waitButton('up', 'down', 'left', 'right', 'a', 'b', 'start');
+        if (k === 'a' || k === 'start') { Sfx.select(); return idx; }
+        if (k === 'b') {
+          if (opts.canCancel === false) continue;
+          Sfx.cancel(); return -1;
+        }
+        const n = options.length;
+        let next = idx;
+        if (cols === 1) {
+          if (k === 'up') next = (idx - 1 + n) % n;
+          if (k === 'down') next = (idx + 1) % n;
+        } else {
+          if (k === 'left' && idx % cols > 0) next = idx - 1;
+          if (k === 'right' && idx % cols < cols - 1 && idx + 1 < n) next = idx + 1;
+          if (k === 'up' && idx - cols >= 0) next = idx - cols;
+          if (k === 'down' && idx + cols < n) next = idx + cols;
+        }
+        if (next !== idx) { idx = next; Sfx.cursor(); paint(); }
+      }
+    } finally {
+      box.remove();
+    }
+  }
+
+  async function yesNo(prompt) {
+    if (prompt) await say(prompt, { noWait: true, keep: true });
+    const r = await choose(['YES', 'NO'], { style: { right: '14px', bottom: '126px' } });
+    hideDialog();
+    return r === 0;
+  }
+
+  // ----- toast -----
+  let toastTimer = null;
+  function toast(text) {
+    let t = document.getElementById('ui-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'ui-toast';
+      t.className = 'gba-box';
+      Object.assign(t.style, {
+        position: 'absolute', left: '12px', top: '12px', padding: '10px 14px',
+        fontSize: '11px', zIndex: 95,
+      });
+      menuLayer.appendChild(t);
+    }
+    t.textContent = text;
+    t.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.style.display = 'none'; }, 1200);
+  }
+
+  // ----- fades / flashes -----
+  function fadeOut(ms = 300) {
+    fadeEl.classList.remove('flash');
+    fadeEl.style.transition = `opacity ${ms}ms linear`;
+    fadeEl.classList.add('on');
+    return wait(ms + 30);
+  }
+  function fadeIn(ms = 300) {
+    fadeEl.classList.remove('flash');
+    fadeEl.style.transition = `opacity ${ms}ms linear`;
+    fadeEl.classList.remove('on');
+    return wait(ms + 30);
+  }
+  async function flashScreen(times = 3) {
+    fadeEl.classList.add('flash');
+    for (let i = 0; i < times; i++) {
+      fadeEl.classList.add('on'); await wait(70);
+      fadeEl.classList.remove('on'); await wait(70);
+    }
+    fadeEl.classList.remove('flash');
+  }
+
+  // ----- battle HUD -----
+  function hpClass(frac) { return frac > 0.5 ? '' : frac > 0.2 ? 'mid' : 'low'; }
+
+  function boxEls(side) {
+    const root = $(side === 'player' ? 'player-box' : 'enemy-box');
+    return {
+      root,
+      name: root.querySelector('.ib-name'),
+      lv: root.querySelector('.ib-lv'),
+      st: root.querySelector('.ib-status'),
+      fill: root.querySelector('.hp-fill'),
+      hpnum: root.querySelector('.ib-hpnum'),
+      exp: root.querySelector('.exp-fill'),
+    };
+  }
+
+  function setBox(side, c, opts = {}) {
+    const e = boxEls(side);
+    const wasHidden = e.root.classList.contains('hidden');
+    e.root.classList.remove('hidden');
+    if (opts.slide || wasHidden) {
+      e.root.classList.remove('slide-enter');
+      void e.root.offsetWidth;
+      e.root.classList.add('slide-enter');
+    }
+    e.name.textContent = creatureName(c);
+    e.lv.textContent = 'Lv' + c.level;
+    setStatusChip(side, c.status);
+    const frac = Math.max(0, c.hp / c.maxHp);
+    e.fill.style.width = (frac * 100) + '%';
+    e.fill.className = 'hp-fill ' + hpClass(frac);
+    if (e.hpnum) e.hpnum.textContent = `${Math.max(0, c.hp)}/ ${c.maxHp}`;
+    if (e.exp && side === 'player') e.exp.style.width = (expProgress(c) * 100) + '%';
+  }
+
+  function setStatusChip(side, status) {
+    const e = boxEls(side);
+    const rect = (status && GameAssets.STATUS_ICON_RECT && GameAssets.battleFx('type_status_icons'))
+      ? GameAssets.STATUS_ICON_RECT[status]
+      : null;
+    if (rect) {
+      e.st.className = `ib-status on px-icon st-${status}`;
+      e.st.style.backgroundPosition = `${-rect.x * 2}px ${-rect.y * 2}px`;
+      e.st.textContent = status;
+    } else {
+      e.st.className = 'ib-status' + (status ? ` on st-${status}` : '');
+      e.st.style.backgroundPosition = '';
+      e.st.textContent = status || '';
+    }
+  }
+
+  // Trainer battles: show the opponent's team as ball icons, darkening each
+  // one as it faints. Pass null (or a wild battle) to hide the row.
+  function setEnemyBalls(party) {
+    const row = document.querySelector('#enemy-box .ib-balls');
+    if (!row) return;
+    row.innerHTML = '';
+    if (!party) return;
+    const url = GameAssets.itemIconUrl('pokeball');
+    for (const c of party) {
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = '';
+      if (c.hp <= 0) img.classList.add('down');
+      row.appendChild(img);
+    }
+  }
+
+  function hideBoxes() {
+    $('player-box').classList.add('hidden');
+    $('enemy-box').classList.add('hidden');
+    setBattleAiPill(false);
+  }
+
+  function escHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function setBattleAiPill(visible, focusConceptId = null) {
+    let pill = document.getElementById('ai-battle-pill');
+    if (!visible || typeof AITutor === 'undefined') {
+      if (pill) pill.classList.add('hidden');
+      return;
+    }
+    if (!pill) {
+      pill = document.createElement('div');
+      pill.id = 'ai-battle-pill';
+      menuLayer.parentElement.appendChild(pill);
+    }
+    const st = AITutor.getStatus();
+    const cid = (focusConceptId !== null && focusConceptId !== undefined)
+      ? focusConceptId
+      : (st.frontier_concept_id || 0);
+    const cInfo = (st.concepts && st.concepts[cid]) || { short_title: `C${cid}`, mastery: 0.4 };
+    const mPct = Math.round((cInfo.mastery || 0) * 100);
+    const live = AITutor.isOnline();
+    pill.innerHTML = `<span class="ai-dot ${live ? '' : 'offline'}"></span>` +
+      `<span>${live ? '3-MODEL AI' : 'LOCAL AI'} &middot; C${cid} ${escHtml(cInfo.short_title || '')} ${mPct}% &middot; &#9733; ${st.badges_earned_count || 0}/5</span>`;
+    pill.classList.remove('hidden');
+  }
+
+  // Tween HP from -> to over ~600ms.
+  function animateHp(side, from, to, max) {
+    const e = boxEls(side);
+    return new Promise(res => {
+      const dur = Math.min(900, 250 + Math.abs(from - to) * 14);
+      const t0 = performance.now();
+      function step(t) {
+        const k = Math.min(1, (t - t0) / dur);
+        const hp = Math.round(from + (to - from) * k);
+        const frac = Math.max(0, hp / max);
+        e.fill.style.width = (frac * 100) + '%';
+        e.fill.className = 'hp-fill ' + hpClass(frac);
+        if (e.hpnum) e.hpnum.textContent = `${Math.max(0, hp)}/ ${max}`;
+        if (k < 1) requestAnimationFrame(step); else res();
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  function animateExp(fromFrac, toFrac) {
+    const e = boxEls('player');
+    return new Promise(res => {
+      const dur = 500;
+      const t0 = performance.now();
+      function step(t) {
+        const k = Math.min(1, (t - t0) / dur);
+        e.exp.style.width = ((fromFrac + (toFrac - fromFrac) * k) * 100) + '%';
+        if (k < 1) requestAnimationFrame(step); else res();
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  // ----- battle move menu -----
+  async function moveMenu(c) {
+    const box = document.createElement('div');
+    box.className = 'menu gba-box grid-menu';
+    Object.assign(box.style, {
+      left: '10px', bottom: '10px', width: '486px', height: '108px',
+      padding: '18px 20px',
+    });
+    const panel = document.createElement('div');
+    panel.className = 'gba-box';
+    panel.id = 'move-panel';
+    menuLayer.appendChild(box);
+    menuLayer.appendChild(panel);
+    const items = c.moves.map(m => {
+      const d = document.createElement('div');
+      d.className = 'mi';
+      d.textContent = MOVES[m.id].name;
+      box.appendChild(d);
+      return d;
+    });
+    let idx = 0;
+    const paint = () => {
+      items.forEach((d, i) => d.classList.toggle('sel', i === idx));
+      const m = c.moves[idx];
+      const tName = MOVES[m.id].type;
+      const tr = (GameAssets.TYPE_ICON_RECT && GameAssets.battleFx('type_status_icons'))
+        ? GameAssets.TYPE_ICON_RECT[tName]
+        : null;
+      const typeHtml = tr
+        ? `TYPE/ <span class="fr-type-badge" style="background-position:${-tr.x * 2}px ${-tr.y * 2}px" title="${tName}"></span>`
+        : `TYPE/${tName}`;
+      panel.innerHTML = `PP&nbsp;&nbsp;${m.pp}/${m.maxPp}<br>${typeHtml}`;
+    };
+    paint();
+    try {
+      while (true) {
+        const k = await Input.waitButton('up', 'down', 'left', 'right', 'a', 'b', 'start');
+        if (k === 'a' || k === 'start') {
+          if (c.moves[idx].pp <= 0) { Sfx.cancel(); setPrompt("There's no PP left for this move!"); await wait(900); continue; }
+          Sfx.select(); return idx;
+        }
+        if (k === 'b') { Sfx.cancel(); return -1; }
+        const n = items.length;
+        let next = idx;
+        if (k === 'left' && idx % 2 === 1) next = idx - 1;
+        if (k === 'right' && idx % 2 === 0 && idx + 1 < n) next = idx + 1;
+        if (k === 'up' && idx >= 2) next = idx - 2;
+        if (k === 'down' && idx + 2 < n) next = idx + 2;
+        if (next !== idx) { idx = next; Sfx.cursor(); paint(); }
+      }
+    } finally {
+      box.remove(); panel.remove();
+    }
+  }
+
+  // ----- party screen -----
+  // mode: 'view' | 'switch' | 'target'  forced: can't cancel
+  async function partyScreen(opts = {}) {
+    const party = Game.player.party;
+    const scr = document.createElement('div');
+    scr.className = 'full-screen';
+    scr.innerHTML = `<div class="fs-title">${opts.title || 'PARTY'}</div>
+      <div class="fs-foot">${opts.forced ? 'Z: choose' : 'Z: choose &nbsp; X: back'}</div>`;
+    const list = document.createElement('div');
+    scr.appendChild(list);
+    menuLayer.appendChild(scr);
+
+    if (!party.length) {
+      list.innerHTML = '<div style="font-size:12px;color:#9ab;padding:20px;line-height:1.8">Your party is empty.<br>Visit Prof. MAPLE\'s lab for your first partner!</div>';
+      await Input.waitButton('a', 'b', 'start');
+      Sfx.cancel();
+      scr.remove();
+      return -1;
+    }
+
+    function render(sel) {
+      list.innerHTML = '';
+      party.forEach((c, i) => {
+        const slot = document.createElement('div');
+        slot.className = 'party-slot' + (i === sel ? ' sel' : '') + (c.hp <= 0 ? ' fainted' : '');
+        const cv = creatureThumb(c.species, 48, c.shiny);
+        const frac = Math.max(0, c.hp / c.maxHp);
+        const cls = frac > 0.5 ? '' : frac > 0.2 ? 'mid' : 'low';
+        const stTag = c.hp <= 0 ? 'FNT' : c.status;
+        slot.appendChild(cv);
+        const info = document.createElement('div');
+        info.className = 'ps-info';
+        info.innerHTML = `<div class="ps-name">${creatureName(c)} <span style="color:#9ab">Lv${c.level}</span>
+            ${stTag ? `<span class="ps-st st-${stTag}">${stTag}</span>` : ''}</div>
+          <div class="ps-hpline"><div class="ps-hptrack"><div class="ps-hpfill ${cls}" style="width:${frac * 100}%"></div></div>
+          <span>${Math.max(0, c.hp)}/${c.maxHp}</span></div>`;
+        slot.appendChild(info);
+        list.appendChild(slot);
+      });
+    }
+
+    let idx = 0;
+    render(idx);
+    try {
+      while (true) {
+        const k = await Input.waitButton('up', 'down', 'a', 'b', 'start');
+        if (k === 'up') { idx = (idx - 1 + party.length) % party.length; Sfx.cursor(); render(idx); }
+        else if (k === 'down') { idx = (idx + 1) % party.length; Sfx.cursor(); render(idx); }
+        else if (k === 'b') {
+          if (opts.forced) { Sfx.cancel(); continue; }
+          Sfx.cancel(); return -1;
+        }
+        else if (k === 'a' || k === 'start') { Sfx.select(); return idx; }
+      }
+    } finally {
+      scr.remove();
+    }
+  }
+
+  // ----- bag screen -----
+  // Returns itemId or null. opts: {inBattle}
+  async function bagScreen(opts = {}) {
+    const entries = Object.entries(Game.player.bag).filter(([, n]) => n > 0);
+    const scr = document.createElement('div');
+    scr.className = 'full-screen';
+    scr.innerHTML = `<div class="fs-title">BAG</div>
+      <div class="fs-foot">Z: use &nbsp; X: back</div>`;
+    const list = document.createElement('div');
+    const desc = document.createElement('div');
+    desc.className = 'bag-desc';
+    scr.appendChild(list); scr.appendChild(desc);
+    menuLayer.appendChild(scr);
+
+    if (!entries.length) {
+      list.innerHTML = '<div style="font-size:12px;color:#9ab;padding:20px">The bag is empty.</div>';
+      await Input.waitButton('a', 'b', 'start');
+      Sfx.cancel();
+      scr.remove();
+      return null;
+    }
+
+    let idx = 0;
+    const render = () => {
+      list.innerHTML = '';
+      entries.forEach(([id, n], i) => {
+        const row = document.createElement('div');
+        row.className = 'bag-row' + (i === idx ? ' sel' : '');
+        row.innerHTML = `<span>${itemIconHtml(id)}${ITEMS[id].name}</span><span>x${String(n).padStart(2, ' ')}</span>`;
+        list.appendChild(row);
+      });
+      desc.textContent = ITEMS[entries[idx][0]].desc;
+    };
+    render();
+    try {
+      while (true) {
+        const k = await Input.waitButton('up', 'down', 'a', 'b', 'start');
+        if (k === 'up') { idx = (idx - 1 + entries.length) % entries.length; Sfx.cursor(); render(); }
+        else if (k === 'down') { idx = (idx + 1) % entries.length; Sfx.cursor(); render(); }
+        else if (k === 'b') { Sfx.cancel(); return null; }
+        else if (k === 'a' || k === 'start') { Sfx.select(); return entries[idx][0]; }
+      }
+    } finally {
+      scr.remove();
+    }
+  }
+
+  // ----- shop -----
+  async function shopScreen() {
+    const scr = document.createElement('div');
+    scr.className = 'full-screen';
+    scr.innerHTML = `<div class="fs-title">POKE MART</div>
+      <div class="money-chip gba-box">$<span id="shop-money"></span></div>
+      <div class="fs-foot">Z: buy &nbsp; LEFT/RIGHT: qty &nbsp; X: leave</div>`;
+    const list = document.createElement('div');
+    const desc = document.createElement('div');
+    desc.className = 'bag-desc';
+    scr.appendChild(list); scr.appendChild(desc);
+    menuLayer.appendChild(scr);
+
+    let idx = 0, qty = 1;
+    const render = () => {
+      document.getElementById('shop-money').textContent = Game.player.money;
+      list.innerHTML = '';
+      SHOP_STOCK.forEach((id, i) => {
+        const row = document.createElement('div');
+        row.className = 'bag-row' + (i === idx ? ' sel' : '');
+        const q = i === idx ? ` x${qty} = $${ITEMS[id].price * qty}` : '';
+        row.innerHTML = `<span>${itemIconHtml(id)}${ITEMS[id].name}</span><span>$${ITEMS[id].price}${q}</span>`;
+        list.appendChild(row);
+      });
+      desc.textContent = ITEMS[SHOP_STOCK[idx]].desc;
+    };
+    render();
+    try {
+      while (true) {
+        const k = await Input.waitButton('up', 'down', 'left', 'right', 'a', 'b', 'start');
+        if (k === 'up') { idx = (idx - 1 + SHOP_STOCK.length) % SHOP_STOCK.length; qty = 1; Sfx.cursor(); render(); }
+        else if (k === 'down') { idx = (idx + 1) % SHOP_STOCK.length; qty = 1; Sfx.cursor(); render(); }
+        else if (k === 'left') { qty = Math.max(1, qty - 1); Sfx.cursor(); render(); }
+        else if (k === 'right') { qty = Math.min(99, qty + 1); Sfx.cursor(); render(); }
+        else if (k === 'b') { Sfx.cancel(); return; }
+        else if (k === 'a' || k === 'start') {
+          const id = SHOP_STOCK[idx];
+          const cost = ITEMS[id].price * qty;
+          if (Game.player.money < cost) { Sfx.cancel(); toast('Not enough money!'); continue; }
+          Game.player.money -= cost;
+          Game.player.bag[id] = (Game.player.bag[id] || 0) + qty;
+          Sfx.buy(); toast(`Bought ${qty} ${ITEMS[id].name}!`);
+          qty = 1; render();
+        }
+      }
+    } finally {
+      scr.remove();
+    }
+  }
+
+  // ----- starter choice -----
+  async function starterChoice() {
+    const ids = ['bulbasaur', 'charmander', 'squirtle'];
+    const scr = document.createElement('div');
+    scr.className = 'full-screen';
+    scr.innerHTML = `<div class="fs-title" style="text-align:center;margin-top:20px">CHOOSE YOUR PARTNER!</div>
+      <div id="starter-row"></div>
+      <div class="fs-foot">LEFT/RIGHT: browse &nbsp; Z: choose &nbsp; X/ESC: back</div>`;
+    menuLayer.appendChild(scr);
+    const row = scr.querySelector('#starter-row');
+    const cards = ids.map(id => {
+      const sp = SPECIES[id];
+      const card = document.createElement('div');
+      card.className = 'starter-card';
+      card.appendChild(creatureThumb(id, 96));
+      const t = sp.types[0];
+      card.insertAdjacentHTML('beforeend',
+        `<div class="sc-name">${sp.name}</div>
+         <div class="sc-type" style="background:${TYPES[t].color}">${t}</div>
+         <div class="sc-blurb">${sp.blurb}</div>`);
+      row.appendChild(card);
+      return card;
+    });
+    let idx = 1;
+    const paint = () => cards.forEach((c, i) => c.classList.toggle('sel', i === idx));
+    paint();
+    try {
+      while (true) {
+        const k = await Input.waitButton('left', 'right', 'a', 'b', 'start');
+        if (k === 'left') { idx = (idx + 2) % 3; Sfx.cursor(); paint(); }
+        else if (k === 'right') { idx = (idx + 1) % 3; Sfx.cursor(); paint(); }
+        else if (k === 'b') { Sfx.cancel(); return null; }
+        else { Sfx.select(); return ids[idx]; }
+      }
+    } finally {
+      scr.remove();
+    }
+  }
+
+  // ----- save / import modals -----
+  function saveModal(code) {
+    return new Promise((resolve) => {
+      const scr = document.createElement('div');
+      scr.className = 'full-screen save-modal';
+      scr.innerHTML = `<div class="fs-title">SAVE CODE</div>
+        <div style="font-size:10px;line-height:1.8;color:#b8c4cc;margin-bottom:10px">
+          Copy this code somewhere safe. Use IMPORT CODE on the title screen to restore.<br>
+          (Also saved to this browser.)</div>
+        <textarea readonly></textarea>
+        <div class="modal-btns">
+          <button id="sm-copy">COPY</button>
+          <button id="sm-close">CLOSE</button>
+        </div>
+        <div class="fs-foot">X: close</div>`;
+      const ta = scr.querySelector('textarea');
+      ta.value = code;
+      menuLayer.appendChild(scr);
+      ta.focus(); ta.select();
+      const unsub = Input.listen(['b'], () => done());
+      function done() {
+        unsub();
+        Sfx.cancel();
+        scr.remove();
+        resolve();
+      }
+      scr.querySelector('#sm-copy').onclick = () => {
+        ta.focus(); ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { /* fall through */ }
+        if (!ok && navigator.clipboard) navigator.clipboard.writeText(code).then(() => {}, () => {});
+        Sfx.select();
+        toast('Copied to clipboard!');
+      };
+      scr.querySelector('#sm-close').onclick = done;
+    });
+  }
+
+  function importModal() {
+    return new Promise((resolve) => {
+      const scr = document.createElement('div');
+      scr.className = 'full-screen save-modal';
+      scr.innerHTML = `<div class="fs-title">IMPORT SAVE CODE</div>
+        <div style="font-size:10px;line-height:1.8;color:#b8c4cc;margin-bottom:10px">
+          Paste your save code below, then press LOAD.</div>
+        <textarea></textarea>
+        <div class="modal-btns">
+          <button id="im-load">LOAD</button>
+          <button id="im-cancel">CANCEL</button>
+        </div>
+        <div class="fs-foot">ESC: cancel</div>`;
+      const ta = scr.querySelector('textarea');
+      menuLayer.appendChild(scr);
+      ta.focus();
+      const done = (val) => {
+        unsub();
+        scr.remove();
+        resolve(val);
+      };
+      const unsub = Input.listen(['b'], () => { Sfx.cancel(); done(null); });
+      scr.querySelector('#im-load').onclick = () => {
+        const code = ta.value.trim();
+        if (!code) { Sfx.cancel(); toast('Paste a save code first!'); ta.focus(); return; }
+        Sfx.select();
+        done(code);
+      };
+      scr.querySelector('#im-cancel').onclick = () => { Sfx.cancel(); done(null); };
+    });
+  }
+
+  // ----- AI Encounter Modal (Double-DQN + DeBERTa-v3-Small + Final-DKT-GRU) -----
+  function askEncounterModal(enc) {
+    return new Promise((resolve) => {
+      const hasChoices = Array.isArray(enc.choices) && enc.choices.length > 0;
+      let openTextMode = !hasChoices;
+      let selIdx = 0;
+      let retries = 1;
+      let hintRevealed = !!enc.podcast_hint;
+      let phase = 'question'; // 'question' | 'grading' | 'feedback'
+      let turnResult = null;
+      let unsub = null;
+      const tStart = performance.now();
+
+      const backdrop = document.createElement('div');
+      backdrop.className = 'ai-modal-backdrop';
+      const card = document.createElement('div');
+      card.className = 'ai-modal-card';
+      backdrop.appendChild(card);
+      menuLayer.appendChild(backdrop);
+
+      function armInput() {
+        if (unsub) unsub();
+        unsub = Input.listen(null, (k) => {
+          unsub = null;
+          onGameKey(k);
+        });
+      }
+
+      function cleanup() {
+        if (unsub) { unsub(); unsub = null; }
+        window.removeEventListener('keydown', onRawKey, true);
+        if (typeof AITutor !== 'undefined') AITutor.stopPodcast();
+        backdrop.remove();
+        Input.clearPressed();
+      }
+
+      function finish() {
+        const out = { encounter: enc, result: turnResult };
+        cleanup();
+        resolve(out);
+      }
+
+      async function submitAnswer(rawAns) {
+        if (phase !== 'question') return;
+        const cleaned = String(rawAns || '').trim();
+        if (openTextMode && cleaned.length < 2) {
+          retries++;
+          Sfx.cancel();
+          toast('Type a short explanation first!');
+          const ta = card.querySelector('.ai-open-textarea');
+          if (ta) ta.focus();
+          armInput();
+          return;
+        }
+        phase = 'grading';
+        if (typeof AITutor !== 'undefined') AITutor.stopPodcast();
+        const elapsedSec = Math.max(0.4, (performance.now() - tStart) / 1000);
+        render();
+        Sfx.select();
+        turnResult = await AITutor.submitEncounter(enc, cleaned, elapsedSec, retries, hintRevealed);
+        if (turnResult.badge_just_earned) Sfx.badge();
+        else if (turnResult.grader.verdict === 'correct') Sfx.statUp();
+        else if (turnResult.grader.verdict === 'partial') Sfx.select();
+        else Sfx.statDown();
+        phase = 'feedback';
+        render();
+        armInput();
+      }
+
+      function triggerPodcastPlay() {
+        hintRevealed = true;
+        const txt = enc.podcast_hint || enc.available_podcast_hint;
+        const aud = enc.podcast_audio || enc.available_podcast_audio;
+        Sfx.select();
+        render();
+        if (typeof AITutor !== 'undefined') {
+          AITutor.playPodcast(aud, txt);
+        }
+      }
+
+      function onGameKey(k) {
+        if (phase === 'grading') { armInput(); return; }
+        if (phase === 'feedback') {
+          if (k === 'a' || k === 'b' || k === 'start') {
+            Sfx.select();
+            finish();
+            return;
+          }
+          armInput();
+          return;
+        }
+        // Question phase
+        if (openTextMode) {
+          if (k === 'b' && hasChoices) {
+            Sfx.cancel();
+            openTextMode = false;
+            render();
+          }
+          armInput();
+          return;
+        }
+        if (k === 'up') {
+          selIdx = (selIdx - 1 + enc.choices.length) % enc.choices.length;
+          Sfx.cursor();
+          render();
+          armInput();
+        } else if (k === 'down') {
+          selIdx = (selIdx + 1) % enc.choices.length;
+          Sfx.cursor();
+          render();
+          armInput();
+        } else if (k === 'a' || k === 'start') {
+          submitAnswer(String(selIdx + 1));
+        } else {
+          armInput();
+        }
+      }
+
+      function onRawKey(e) {
+        if (phase === 'feedback') {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            Sfx.select();
+            finish();
+          }
+          return;
+        }
+        if (phase !== 'question') return;
+        const inTa = e.target && e.target.tagName === 'TEXTAREA';
+        if (inTa) {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            e.stopPropagation();
+            submitAnswer(e.target.value);
+          }
+          return;
+        }
+        if (!openTextMode && hasChoices && ['1', '2', '3', '4'].includes(e.key)) {
+          const idx = parseInt(e.key, 10) - 1;
+          if (idx < enc.choices.length) {
+            e.preventDefault();
+            e.stopPropagation();
+            selIdx = idx;
+            submitAnswer(String(idx + 1));
+          }
+        } else if (!openTextMode && (e.key === 't' || e.key === 'T')) {
+          e.preventDefault();
+          e.stopPropagation();
+          openTextMode = true;
+          Sfx.select();
+          render();
+        } else if ((e.key === 'h' || e.key === 'H') && (enc.podcast_hint || enc.available_podcast_hint)) {
+          e.preventDefault();
+          e.stopPropagation();
+          triggerPodcastPlay();
+        }
+      }
+
+      function render() {
+        const st = typeof AITutor !== 'undefined' ? AITutor.getStatus() : { affect: {} };
+        const live = typeof AITutor !== 'undefined' && AITutor.isOnline();
+        const isBoss = enc.rl_action === 4 || openTextMode;
+        const mPct = Math.round((enc.target_mastery !== undefined ? enc.target_mastery : 0.4) * 100);
+        const topHtml = `
+          <div class="ai-top-bar">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span class="ai-dot ${live ? '' : 'offline'}"></span>
+              <span class="ai-badge-rl ${isBoss ? 'boss' : ''}">RL [${enc.rl_action}] ${escHtml(enc.rl_action_name)}</span>
+            </div>
+            <div class="ai-badge-concept">C${enc.target_concept_id}: ${escHtml(enc.target_concept_short || enc.target_concept_title)} &middot; ${mPct}%</div>
+          </div>
+        `;
+
+        if (phase === 'grading') {
+          card.innerHTML = `${topHtml}
+            <div class="ai-body-area" style="align-items:center;justify-content:center;text-align:center">
+              <div style="font-size:11px;color:#88ccff;margin-bottom:10px">NEURAL EVALUATION IN PROGRESS...</div>
+              <div style="font-family:var(--dialog-font);font-size:19px;color:#d0e2f5">Running DeBERTa-v3 Cross-Encoder + Final-DKT-GRU Telemetry...</div>
+            </div>`;
+          return;
+        }
+
+        if (phase === 'feedback' && turnResult) {
+          const v = turnResult.grader.verdict;
+          const semPct = Math.round((turnResult.grader.semantic_score || 0) * 100);
+          const cid = turnResult.target_concept_id;
+          const mBefore = Math.round((turnResult.mastery_before[cid] || 0) * 1000) / 10;
+          const mAfter = Math.round((turnResult.mastery_after[cid] || 0) * 1000) / 10;
+          const aff = turnResult.affect || { concentrating: 0.7, frustrated: 0.25, bored: 0.15 };
+          const lat = turnResult.latencies_ms || { total_ai_turn_ms: 0 };
+
+          let vTitle = '';
+          if (v === 'correct') {
+            vTitle = turnResult.used_neural_grader
+              ? `&#10003; CORRECT (${semPct}% Semantic Match) &mdash; NEURAL CRITICAL STRIKE (1.35x DMG)!`
+              : `&#10003; CORRECT &mdash; FOCUSED STRIKE (1.15x DMG)!`;
+          } else if (v === 'partial') {
+            vTitle = `&#9680; PARTIAL UNDERSTANDING (${semPct}% Semantic Match) &mdash; GLANCING HIT!`;
+          } else {
+            const rightOpt = (hasChoices && enc.correct_idx != null)
+              ? ` (Correct Move: [${enc.correct_idx + 1}])`
+              : '';
+            vTitle = `&#10007; INCORRECT${rightOpt} &mdash; ATTACK FIZZLED!`;
+          }
+
+          const badgeBanner = turnResult.badge_just_earned
+            ? `<div class="ai-badge-unlock">&#9733; CONCEPT SYNTHESIS BADGE UNLOCKED: C${cid} ${escHtml(turnResult.target_concept_title)}! (+Bonus EXP)</div>`
+            : '';
+
+          card.innerHTML = `${topHtml}
+            <div class="ai-body-area ai-scroll">
+              <div>
+                <div class="ai-verdict-banner ${v}">${vTitle}</div>
+                ${badgeBanner}
+                <div class="ai-ref-box"><strong>Prof. Ada's Insight:</strong> ${escHtml(turnResult.reference_answer)}</div>
+                <div class="ai-telem-grid">
+                  <div>GRADER: ${escHtml(turnResult.grader.graded_by)}</div>
+                  <div>DKT MASTERY C${cid}: ${mBefore}% &rarr; <strong>${mAfter}%</strong></div>
+                  <div>AFFECT: Focus ${Math.round(aff.concentrating * 100)}% &middot; Frust ${Math.round(aff.frustrated * 100)}% &middot; Bored ${Math.round(aff.bored * 100)}%</div>
+                  <div>LATENCY: ${lat.total_ai_turn_ms} ms (Resp: ${turnResult.response_sec}s)</div>
+                </div>
+              </div>
+              <div class="ai-footer-bar">
+                <div class="ai-foot-hint">Press Z / SPACE / ENTER or click CONTINUE</div>
+                <button class="ai-btn-primary" id="ai-cont-btn">EXECUTE MOVE &rarr;</button>
+              </div>
+            </div>`;
+          const contBtn = card.querySelector('#ai-cont-btn');
+          if (contBtn) contBtn.onclick = () => { Sfx.select(); finish(); };
+          return;
+        }
+
+        // Question Phase
+        const hintStr = enc.podcast_hint || (hintRevealed ? enc.available_podcast_hint : null);
+        const podcastHtml = hintStr
+          ? `<div class="ai-podcast-bar">
+               <div class="ai-podcast-text">&#127911; ${escHtml(hintStr)}</div>
+               <button class="ai-btn-mini" id="ai-play-pod">&#9654; AUDIO</button>
+             </div>`
+          : '';
+
+        let responseHtml = '';
+        if (!openTextMode && hasChoices) {
+          const btns = enc.choices.map((ch, i) => `
+            <button type="button" class="ai-choice-btn ${i === selIdx ? 'sel' : ''}" data-cidx="${i}">
+              <span class="ai-ckey">${i + 1}</span>
+              <span>${escHtml(ch)}</span>
+            </button>
+          `).join('');
+          responseHtml = `<div class="ai-choices-list">${btns}</div>`;
+        } else {
+          responseHtml = `
+            <div class="ai-open-wrap">
+              <div class="ai-open-label">&#9876; DEBERTA-V3-SMALL SEMANTIC GRADING &mdash; EXPLAIN IN YOUR OWN WORDS:</div>
+              <textarea class="ai-open-textarea" placeholder="Type your explanation here... (Ctrl+Enter or click SUBMIT)"></textarea>
+            </div>
+          `;
+        }
+
+        const hintBtnHtml = (!hintStr && enc.available_podcast_hint)
+          ? `<button type="button" class="ai-btn-mini" id="ai-req-hint">&#127911; HINT [H]</button>`
+          : '';
+        const modeBtnHtml = (!openTextMode && hasChoices)
+          ? `<button type="button" class="ai-btn-mini" id="ai-to-open">&#9997; OWN WORDS [T]</button>`
+          : (openTextMode && hasChoices
+            ? `<button type="button" class="ai-btn-mini" id="ai-to-mc">&larr; 4 CHOICES [ESC]</button>`
+            : '');
+        const submitBtnHtml = openTextMode
+          ? `<button type="button" class="ai-btn-primary" id="ai-sub-open">SUBMIT TO DeBERTa &rarr;</button>`
+          : '';
+
+        const footHint = openTextMode
+          ? 'Type answer &middot; Ctrl+Enter or click SUBMIT'
+          : 'UP/DOWN + Z (or keys 1-4) &middot; [T] Own Words &middot; [H] Podcast';
+
+        card.innerHTML = `${topHtml}
+          ${podcastHtml}
+          <div class="ai-question-box">${escHtml(enc.question)}</div>
+          <div class="ai-body-area ai-scroll">
+            ${responseHtml}
+            <div class="ai-footer-bar">
+              <div class="ai-foot-hint">${footHint}</div>
+              <div class="ai-action-row">
+                ${hintBtnHtml}
+                ${modeBtnHtml}
+                ${submitBtnHtml}
+              </div>
+            </div>
+          </div>`;
+
+        const playBtn = card.querySelector('#ai-play-pod');
+        if (playBtn) playBtn.onclick = () => triggerPodcastPlay();
+        const reqHintBtn = card.querySelector('#ai-req-hint');
+        if (reqHintBtn) reqHintBtn.onclick = () => triggerPodcastPlay();
+        const toOpenBtn = card.querySelector('#ai-to-open');
+        if (toOpenBtn) {
+          toOpenBtn.onclick = () => { openTextMode = true; Sfx.select(); render(); };
+        }
+        const toMcBtn = card.querySelector('#ai-to-mc');
+        if (toMcBtn) {
+          toMcBtn.onclick = () => { openTextMode = false; Sfx.cancel(); render(); armInput(); };
+        }
+        card.querySelectorAll('.ai-choice-btn').forEach(btn => {
+          btn.onclick = () => {
+            const idx = parseInt(btn.dataset.cidx, 10);
+            selIdx = idx;
+            submitAnswer(String(idx + 1));
+          };
+        });
+        const ta = card.querySelector('.ai-open-textarea');
+        if (ta) {
+          setTimeout(() => ta.focus(), 20);
+          const subBtn = card.querySelector('#ai-sub-open');
+          if (subBtn) subBtn.onclick = () => submitAnswer(ta.value);
+        }
+      }
+
+      window.addEventListener('keydown', onRawKey, true);
+      render();
+      armInput();
+      // Auto-play spoken 15s podcast clip when Double-DQN selects Action [0]!
+      if (enc.rl_action === 0 && (enc.podcast_audio || enc.podcast_hint) && typeof AITutor !== 'undefined') {
+        AITutor.playPodcast(enc.podcast_audio, enc.podcast_hint);
+      }
+    });
+  }
+
+  // ----- KnowledgeQuest 3-Tab AI Field Journal & Study Hub -----
+  async function questScreen() {
+    if (typeof AITutor !== 'undefined') await AITutor.refreshStatus();
+    return new Promise((resolve) => {
+      let tab = 0; // 0: Mastery & Affect, 1: Study Notes (YOLO/OCR), 2: AI Lab & Course
+      let selConcept = 0;
+      let unsub = null;
+
+      const scr = document.createElement('div');
+      scr.className = 'full-screen quest-modal';
+      menuLayer.appendChild(scr);
+      Sfx.select();
+
+      function armInput() {
+        if (unsub) unsub();
+        unsub = Input.listen(['up', 'down', 'left', 'right', 'a', 'b', 'start'], (k) => {
+          unsub = null;
+          onKey(k);
+        });
+      }
+
+      function closeJournal() {
+        if (unsub) { unsub(); unsub = null; }
+        if (typeof AITutor !== 'undefined') AITutor.stopPodcast();
+        Sfx.cancel();
+        scr.remove();
+        Input.clearPressed();
+        resolve();
+      }
+
+      function onKey(k) {
+        if (k === 'b' || k === 'start') {
+          closeJournal();
+          return;
+        }
+        if (k === 'left') {
+          tab = (tab + 2) % 3;
+          Sfx.cursor();
+          render();
+        } else if (k === 'right') {
+          tab = (tab + 1) % 3;
+          Sfx.cursor();
+          render();
+        } else if (k === 'up') {
+          selConcept = (selConcept + 4) % 5;
+          Sfx.cursor();
+          render();
+        } else if (k === 'down') {
+          selConcept = (selConcept + 1) % 5;
+          Sfx.cursor();
+          render();
+        } else if (k === 'a' && tab === 1) {
+          const st = AITutor.getStatus();
+          const c = st.concepts[selConcept];
+          if (c) {
+            Sfx.select();
+            AITutor.playPodcast(c.podcast_audio, c.podcast_hint);
+            toast(`Playing C${selConcept} Podcast Clip...`);
+          }
+        }
+        armInput();
+      }
+
+      function render() {
+        const st = typeof AITutor !== 'undefined' ? AITutor.getStatus() : { concepts: [], affect: {} };
+        const live = typeof AITutor !== 'undefined' && AITutor.isOnline();
+        const aff = st.affect || { concentrating: 0.68, frustrated: 0.30, bored: 0.18 };
+
+        let bodyHtml = '';
+        if (tab === 0) {
+          const rows = (st.concepts || []).map((c, idx) => {
+            const pct = Math.round((c.mastery || 0) * 100);
+            const preTxt = c.prereqs && c.prereqs.length ? `Prereq: C${c.prereqs.join(', C')}` : 'Foundation';
+            const badgeHtml = c.badge
+              ? '<span style="color:#ffd848">&#9733; BADGE EARNED</span>'
+              : `<span style="color:#8aa2bc">${preTxt}</span>`;
+            return `
+              <div class="kq-concept-row ${idx === selConcept ? 'sel' : ''}" data-cidx="${idx}">
+                <div class="kq-crow-top">
+                  <span>C${c.concept_id}: ${escHtml(c.title)}</span>
+                  <span>${badgeHtml} &nbsp; <strong>${pct}%</strong></span>
+                </div>
+                <div class="kq-bar-track"><div class="kq-bar-fill" style="width:${pct}%"></div></div>
+              </div>
+            `;
+          }).join('');
+
+          const lt = st.last_turn && st.last_turn.latencies_ms
+            ? `Last AI Turn: RL ${st.last_turn.latencies_ms.rl_gamemaster_ms}ms | DeBERTa ${st.last_turn.latencies_ms.deberta_grader_ms}ms | DKT ${st.last_turn.latencies_ms.final_dkt_gru_ms}ms`
+            : 'Fight wild creatures or trainers to record live 3-model telemetry!';
+
+          bodyHtml = `
+            <div class="kq-scroll ai-scroll">
+              ${rows}
+              <div class="kq-affect-strip">
+                <div class="kq-affect-card">FOCUS: <strong style="color:#68e090">${Math.round(aff.concentrating * 100)}%</strong><br><span style="color:#7890a8">Behavioral Only</span></div>
+                <div class="kq-affect-card">FRUSTRATED: <strong style="color:#ff9488">${Math.round(aff.frustrated * 100)}%</strong><br><span style="color:#7890a8">Zero Webcam</span></div>
+                <div class="kq-affect-card">BORED: <strong style="color:#f8d058">${Math.round(aff.bored * 100)}%</strong><br><span style="color:#7890a8">Badges: ${st.badges_earned_count || 0}/5</span></div>
+              </div>
+              <div style="margin-top:7px;font-size:7.5px;color:#8aa4c0">${escHtml(lt)}</div>
+            </div>
+          `;
+        } else if (tab === 1) {
+          const c = (st.concepts && st.concepts[selConcept]) || { concept_id: 0, title: '', summary_bullets: [], podcast_hint: '' };
+          const pills = (st.concepts || []).map((ci, i) => `
+            <button type="button" class="ai-btn-mini" data-pickc="${i}" style="${i === selConcept ? 'border-color:#f8d048;color:#f8d048' : ''}">C${i}: ${escHtml(ci.short_title || ('C' + i))}</button>
+          `).join('');
+          const bullets = (c.summary_bullets || []).map(b => `<div class="kq-note-bullet">&bull; ${escHtml(b)}</div>`).join('');
+          bodyHtml = `
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">${pills}</div>
+            <div class="kq-scroll ai-scroll" style="background:#101722;border:1px solid #2e4058;border-radius:6px;padding:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+                <div style="font-size:9px;color:#f8d048">C${c.concept_id}: ${escHtml(c.title)}</div>
+                <button type="button" class="ai-btn-mini" id="kq-play-note-pod">&#9654; PLAY 15s PODCAST [Z]</button>
+              </div>
+              ${bullets}
+              <div class="ai-podcast-bar" style="margin-top:8px">
+                <div class="ai-podcast-text">&#127911; ${escHtml(c.podcast_hint || '')}</div>
+              </div>
+            </div>
+          `;
+        } else {
+          const m = st.models || { dkt: {}, rl: {}, grader: {}, dino: {} };
+          bodyHtml = `
+            <div class="kq-scroll ai-scroll" style="background:#101722;border:1px solid #2e4058;border-radius:6px;padding:12px">
+              <div style="font-size:9px;color:#68c0f8;margin-bottom:8px">LOADED PYTORCH CHECKPOINTS (4-MODEL HYBRID ENGINE)</div>
+              <div style="font-family:var(--dialog-font);font-size:17px;line-height:1.35;color:#dce8f6;margin-bottom:10px">
+                &bull; <strong>Model #1 (Knowledge Tracing):</strong> ${escHtml(m.dkt && m.dkt.name)} (Test AUC: 0.7996)<br>
+                &bull; <strong>Model #2 (Adaptive Game Master):</strong> ${escHtml(m.rl && m.rl.name)} (5-Action Policy)<br>
+                &bull; <strong>Model #3 (Semantic Grader):</strong> ${escHtml(m.grader && m.grader.name)} (${escHtml(m.grader && m.grader.device)})<br>
+                &bull; <strong>Model #4 (Vision Grounding):</strong> ${escHtml((m.dino && m.dino.name) || 'Grounding-DINO-Tiny')} (Mean IoU: 0.894 &middot; 10 Lab Diagrams)
+              </div>
+              <div style="margin-bottom:10px">
+                <button type="button" class="ai-btn-primary" id="kq-open-dino-btn">&#128269; LAUNCH GROUNDING DINO LAB MONITOR (10 DIAGRAM PUZZLES)</button>
+              </div>
+              <div style="font-size:9px;color:#f8d048;margin-bottom:6px">SWITCH COURSE / TEST LEARNER PROFILE</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+                <button type="button" class="ai-btn-mini" data-course="vision_yolo_ocr" data-prof="average">Course: YOLO &amp; OCR (Average)</button>
+                <button type="button" class="ai-btn-mini" data-course="vision_yolo_ocr" data-prof="struggling">YOLO &amp; OCR (Struggling &rarr; Hints)</button>
+                <button type="button" class="ai-btn-mini" data-course="vision_yolo_ocr" data-prof="advanced">YOLO &amp; OCR (Advanced &rarr; Boss)</button>
+                <button type="button" class="ai-btn-mini" data-course="dl_foundations" data-prof="average">Course: DL Foundations</button>
+              </div>
+              <div style="font-family:var(--dialog-font);font-size:16px;color:#9bb4ce">
+                Tip: Walk up to the Computer Console in Prof. Ada's Lab (or click the button above) to solve Grounding DINO visual diagram puzzles!
+              </div>
+            </div>
+          `;
+        }
+
+        scr.innerHTML = `
+          <div class="kq-journal-win">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <div>
+                <div class="quest-title-badge">KNOWLEDGEQUEST AI FIELD JOURNAL</div>
+                <div class="quest-subtitle">${escHtml(st.course_title || 'Deep Learning Vision: CNNs, YOLO & OCR')}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="ai-dot ${live ? '' : 'offline'}"></span>
+                <span style="font-size:8px;color:${live ? '#78f098' : '#f8b848'}">${live ? '4-MODEL SERVER ONLINE' : 'OFFLINE FALLBACK'}</span>
+                <button type="button" class="ai-btn-mini" id="kq-close-btn">&#10005; CLOSE</button>
+              </div>
+            </div>
+            <div class="kq-tabs">
+              <button type="button" class="kq-tab ${tab === 0 ? 'active' : ''}" data-tab="0">[1] AI MASTERY &amp; AFFECT</button>
+              <button type="button" class="kq-tab ${tab === 1 ? 'active' : ''}" data-tab="1">[2] STUDY NOTES (YOLO/OCR)</button>
+              <button type="button" class="kq-tab ${tab === 2 ? 'active' : ''}" data-tab="2">[3] AI LAB &amp; GROUNDING DINO</button>
+            </div>
+            ${bodyHtml}
+            <div style="margin-top:7px;font-size:7.5px;color:#8aa0be;text-align:right">
+              LEFT/RIGHT: Switch Tab &middot; UP/DOWN: Select Concept &middot; X / ESC: Close
+            </div>
+          </div>
+        `;
+
+        const closeBtn = scr.querySelector('#kq-close-btn');
+        if (closeBtn) closeBtn.onclick = closeJournal;
+        const dinoBtn = scr.querySelector('#kq-open-dino-btn');
+        if (dinoBtn) {
+          dinoBtn.onclick = async () => {
+            if (unsub) { unsub(); unsub = null; }
+            scr.remove();
+            await dinoDiagramScreen(selConcept);
+            resolve();
+          };
+        }
+        scr.querySelectorAll('.kq-tab').forEach(b => {
+          b.onclick = () => { tab = parseInt(b.dataset.tab, 10); Sfx.cursor(); render(); };
+        });
+        scr.querySelectorAll('[data-cidx]').forEach(r => {
+          r.onclick = () => { selConcept = parseInt(r.dataset.cidx, 10); tab = 1; Sfx.select(); render(); };
+        });
+        scr.querySelectorAll('[data-pickc]').forEach(b => {
+          b.onclick = () => { selConcept = parseInt(b.dataset.pickc, 10); Sfx.cursor(); render(); };
+        });
+        const playNoteBtn = scr.querySelector('#kq-play-note-pod');
+        if (playNoteBtn) {
+          playNoteBtn.onclick = () => {
+            const c = st.concepts[selConcept];
+            if (c) {
+              Sfx.select();
+              AITutor.playPodcast(c.podcast_audio, c.podcast_hint);
+            }
+          };
+        }
+        scr.querySelectorAll('[data-course]').forEach(b => {
+          b.onclick = async () => {
+            Sfx.select();
+            await AITutor.resetSession(b.dataset.course, b.dataset.prof);
+            toast(`Switched to ${b.dataset.course} (${b.dataset.prof})!`);
+            tab = 0;
+            render();
+          };
+        });
+      }
+
+      render();
+      armInput();
+    });
+  }
+
+  // ----- Model #4: Grounding DINO Interactive Lab Diagram Calibration Terminal -----
+  async function dinoDiagramScreen(initialConceptId = null) {
+    const puzzles = (typeof AITutor !== 'undefined' && AITutor.getVisionPuzzles)
+      ? await AITutor.getVisionPuzzles()
+      : [];
+    if (!puzzles.length) return;
+
+    return new Promise((resolve) => {
+      let pIdx = 0;
+      if (initialConceptId !== null && initialConceptId !== undefined) {
+        const found = puzzles.findIndex(p => Number(p.concept_id) === Number(initialConceptId));
+        if (found >= 0) pIdx = found;
+      }
+
+      let evalResult = null;
+      let busy = false;
+      let dragStart = null;
+      let dragCurr = null;
+      let tStart = performance.now();
+      let unsub = null;
+      const imgCache = {};
+
+      const scr = document.createElement('div');
+      scr.className = 'full-screen quest-modal';
+      menuLayer.appendChild(scr);
+      Sfx.select();
+
+      function armInput() {
+        if (unsub) unsub();
+        unsub = Input.listen(['left', 'right', 'a', 'b', 'start'], (k) => {
+          unsub = null;
+          if (k === 'b' || k === 'start') {
+            closeScreen();
+            return;
+          }
+          if (k === 'left') {
+            pIdx = (pIdx - 1 + puzzles.length) % puzzles.length;
+            evalResult = null;
+            tStart = performance.now();
+            Sfx.cursor();
+            render();
+          } else if (k === 'right' || (k === 'a' && evalResult)) {
+            pIdx = (pIdx + 1) % puzzles.length;
+            evalResult = null;
+            tStart = performance.now();
+            Sfx.cursor();
+            render();
+          }
+          armInput();
+        });
+      }
+
+      function closeScreen() {
+        if (unsub) { unsub(); unsub = null; }
+        Sfx.cancel();
+        scr.remove();
+        Input.clearPressed();
+        resolve();
+      }
+
+      function drawDiagramCanvas(cvs, p) {
+        if (!cvs) return;
+        const ctx = cvs.getContext('2d');
+        const W = 720, H = 420;
+        ctx.fillStyle = '#141c2c';
+        ctx.fillRect(0, 0, W, H);
+
+        const src = p.diagram_file;
+        let im = imgCache[src];
+        if (!im) {
+          im = new Image();
+          imgCache[src] = im;
+          im.onload = () => drawDiagramCanvas(cvs, p);
+          im.src = src;
+        }
+        if (im && im.complete && im.naturalWidth > 0) {
+          ctx.drawImage(im, 0, 0, W, H);
+        } else {
+          // Instant fallback schematic while PNG loads
+          ctx.fillStyle = '#1c2a42';
+          ctx.fillRect(20, 60, W - 40, H - 80);
+          ctx.strokeStyle = '#4890d8';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(20, 60, W - 40, H - 80);
+          const tb = p.target_box || [100, 100, 300, 300];
+          ctx.fillStyle = '#284868';
+          ctx.fillRect(tb[0], tb[1], tb[2] - tb[0], tb[3] - tb[1]);
+          ctx.strokeStyle = '#f8c848';
+          ctx.strokeRect(tb[0], tb[1], tb[2] - tb[0], tb[3] - tb[1]);
+        }
+
+        // Draw live drag selection box
+        if (dragStart && dragCurr) {
+          const x1 = Math.min(dragStart.x, dragCurr.x);
+          const y1 = Math.min(dragStart.y, dragCurr.y);
+          const w = Math.abs(dragCurr.x - dragStart.x);
+          const h = Math.abs(dragCurr.y - dragStart.y);
+          ctx.save();
+          ctx.fillStyle = 'rgba(255, 216, 72, 0.22)';
+          ctx.fillRect(x1, y1, w, h);
+          ctx.strokeStyle = '#ffd848';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(x1, y1, w, h);
+          ctx.restore();
+        }
+
+        // Draw Grounding DINO evaluation result overlay
+        if (evalResult) {
+          const gb = evalResult.grounded_box || p.target_box;
+          if (gb && gb.length === 4) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(56, 248, 144, 0.20)';
+            ctx.fillRect(gb[0], gb[1], gb[2] - gb[0], gb[3] - gb[1]);
+            ctx.strokeStyle = '#38f890';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(gb[0], gb[1], gb[2] - gb[0], gb[3] - gb[1]);
+            ctx.fillStyle = '#0e1e18';
+            ctx.fillRect(gb[0], Math.max(2, gb[1] - 24), 255, 22);
+            ctx.fillStyle = '#58ffaa';
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText(
+              `Grounding DINO: ${evalResult.target_label.slice(0, 22)} (${Math.round((evalResult.dino_confidence || 0.48) * 100)}%)`,
+              gb[0] + 6,
+              Math.max(17, gb[1] - 8)
+            );
+            ctx.restore();
+          }
+
+          if (evalResult.user_box && evalResult.user_box.length === 4) {
+            const ub = evalResult.user_box;
+            ctx.save();
+            ctx.strokeStyle = '#ffd848';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([5, 4]);
+            ctx.strokeRect(ub[0], ub[1], ub[2] - ub[0], ub[3] - ub[1]);
+            ctx.restore();
+          } else if (evalResult.click_point && evalResult.click_point.length === 2) {
+            const [cx, cy] = evalResult.click_point;
+            ctx.save();
+            ctx.strokeStyle = evalResult.verdict === 'correct' ? '#ffd848' : '#ff6868';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(cx - 18, cy); ctx.lineTo(cx + 18, cy);
+            ctx.moveTo(cx, cy - 18); ctx.lineTo(cx, cy + 18);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      }
+
+      function toCanvasCoords(cvs, clientX, clientY) {
+        const rect = cvs.getBoundingClientRect();
+        const scaleX = 720 / Math.max(1, rect.width);
+        const scaleY = 420 / Math.max(1, rect.height);
+        return {
+          x: Math.max(0, Math.min(720, (clientX - rect.left) * scaleX)),
+          y: Math.max(0, Math.min(420, (clientY - rect.top) * scaleY)),
+        };
+      }
+
+      async function handleSubmission(clickPt, boxArr) {
+        if (busy) return;
+        busy = true;
+        const p = puzzles[pIdx];
+        const elapsed = Math.max(0.5, (performance.now() - tStart) / 1000);
+        Sfx.select();
+        evalResult = await AITutor.submitVisionPuzzle(
+          p.puzzle_id,
+          clickPt ? clickPt.x : null,
+          clickPt ? clickPt.y : null,
+          boxArr,
+          elapsed
+        );
+        busy = false;
+        if (evalResult.verdict === 'correct') {
+          Sfx.statUp();
+          if (typeof Game !== 'undefined' && Game.player && Game.player.party && Game.player.party[0]) {
+            Game.player.party[0].exp = (Game.player.party[0].exp || 0) + (evalResult.xp_gained || 45);
+          }
+        } else if (evalResult.verdict === 'partial') {
+          Sfx.select();
+        } else {
+          Sfx.statDown();
+        }
+        render();
+      }
+
+      function render() {
+        const p = puzzles[pIdx];
+        const live = typeof AITutor !== 'undefined' && AITutor.isOnline();
+        const pills = puzzles.map((item, idx) => {
+          const tag = `C${item.concept_id}-${idx % 2 === 0 ? 'A' : 'B'}`;
+          return `<button type="button" class="ai-btn-mini" data-pidx="${idx}" style="${idx === pIdx ? 'border-color:#58f898;color:#58f898' : ''}">${tag}</button>`;
+        }).join('');
+
+        let statusFooter = '';
+        if (evalResult) {
+          const cid = evalResult.concept_id;
+          const mBefore = Math.round(((evalResult.mastery_before && evalResult.mastery_before[cid]) || 0.4) * 1000) / 10;
+          const mAfter = Math.round(((evalResult.mastery_after && evalResult.mastery_after[cid]) || 0.5) * 1000) / 10;
+          const vCol = evalResult.verdict === 'correct' ? '#58f898' : (evalResult.verdict === 'partial' ? '#f8d048' : '#ff8080');
+          statusFooter = `
+            <div style="background:#0d1624;border:1px solid ${vCol};border-radius:6px;padding:7px 10px;margin-top:6px">
+              <div style="font-size:8.5px;color:${vCol};margin-bottom:3px">
+                ${escHtml(evalResult.graded_by)} &middot; IoU: ${evalResult.iou} &middot; DKT C${cid} Mastery: ${mBefore}% &rarr; <strong>${mAfter}%</strong> (+${evalResult.xp_gained || 0} EXP)
+              </div>
+              <div style="font-family:var(--dialog-font);font-size:15.5px;color:#dce8f6;line-height:1.25">
+                ${escHtml(evalResult.feedback)}
+              </div>
+            </div>
+          `;
+        } else {
+          statusFooter = `
+            <div style="font-family:var(--dialog-font);font-size:16px;color:#9cc4e8;margin-top:6px">
+              &#128070; <strong>Click directly on the target component</strong> OR <strong>click-and-drag a bounding box</strong> around it on the schematic above! (100% Privacy-First Vision AI &mdash; Zero Webcam)
+            </div>
+          `;
+        }
+
+        scr.innerHTML = `
+          <div class="kq-journal-win" style="padding:10px 14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px">
+              <div>
+                <div class="quest-title-badge" style="color:#58f898">PROF. ADA'S LAB MONITOR &mdash; GROUNDING DINO VISION AI</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span class="ai-dot ${live ? '' : 'offline'}"></span>
+                <span style="font-size:7.5px;color:${live ? '#78f098' : '#f8b848'}">${live ? 'GROUNDING-DINO-TINY (CUDA)' : 'OFFLINE DINO CACHE'}</span>
+                <button type="button" class="ai-btn-mini" id="dino-next-btn">NEXT PUZZLE &rarr;</button>
+                <button type="button" class="ai-btn-mini" id="dino-close-btn">&#10005; EXIT</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${pills}</div>
+            <div style="background:#142238;border:1px solid #3c6ea8;border-radius:5px;padding:6px 10px;margin-bottom:6px;font-family:var(--dialog-font);font-size:17px;color:#f8e078">
+              ${escHtml(p.prompt)}
+            </div>
+            <div style="position:relative;display:flex;justify-content:center;background:#0a101a;border:2px solid #2e4668;border-radius:6px;overflow:hidden">
+              <canvas id="dino-diagram-canvas" width="720" height="420" style="width:100%;max-height:245px;object-fit:contain;cursor:crosshair;touch-action:none"></canvas>
+            </div>
+            ${statusFooter}
+          </div>
+        `;
+
+        const closeBtn = scr.querySelector('#dino-close-btn');
+        if (closeBtn) closeBtn.onclick = closeScreen;
+        const nextBtn = scr.querySelector('#dino-next-btn');
+        if (nextBtn) {
+          nextBtn.onclick = () => {
+            pIdx = (pIdx + 1) % puzzles.length;
+            evalResult = null;
+            tStart = performance.now();
+            Sfx.cursor();
+            render();
+          };
+        }
+        scr.querySelectorAll('[data-pidx]').forEach(b => {
+          b.onclick = () => {
+            pIdx = parseInt(b.dataset.pidx, 10);
+            evalResult = null;
+            tStart = performance.now();
+            Sfx.cursor();
+            render();
+          };
+        });
+
+        const cvs = scr.querySelector('#dino-diagram-canvas');
+        drawDiagramCanvas(cvs, p);
+
+        if (cvs) {
+          cvs.onpointerdown = (e) => {
+            if (busy) return;
+            cvs.setPointerCapture(e.pointerId);
+            dragStart = toCanvasCoords(cvs, e.clientX, e.clientY);
+            dragCurr = { ...dragStart };
+            drawDiagramCanvas(cvs, p);
+          };
+          cvs.onpointermove = (e) => {
+            if (!dragStart) return;
+            dragCurr = toCanvasCoords(cvs, e.clientX, e.clientY);
+            drawDiagramCanvas(cvs, p);
+          };
+          cvs.onpointerup = async (e) => {
+            if (!dragStart) return;
+            const endPt = toCanvasCoords(cvs, e.clientX, e.clientY);
+            const dx = Math.abs(endPt.x - dragStart.x);
+            const dy = Math.abs(endPt.y - dragStart.y);
+            const startCopy = { ...dragStart };
+            dragStart = null;
+            dragCurr = null;
+            if (dx >= 14 && dy >= 14) {
+              await handleSubmission(null, [startCopy.x, startCopy.y, endPt.x, endPt.y]);
+            } else {
+              await handleSubmission(endPt, null);
+            }
+          };
+        }
+      }
+
+      render();
+      armInput();
+    });
+  }
+
+  return {
+    init, say, sayLines, setPrompt, hideDialog, choose, yesNo, toast,
+    fadeOut, fadeIn, flashScreen,
+    setBox, setStatusChip, setEnemyBalls, hideBoxes, setBattleAiPill, animateHp, animateExp,
+    moveMenu, partyScreen, bagScreen, shopScreen, starterChoice,
+    saveModal, importModal, askEncounterModal, questScreen, dinoDiagramScreen,
+  };
+})();

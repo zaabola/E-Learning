@@ -1,0 +1,989 @@
+{
+  "num_skills": 138,
+  "telemetry_dim": 13,
+  "telemetry_features": [
+    "log_response_time_norm",
+    "rt_rapid_guess",
+    "rt_optimal_flow",
+    "rt_deliberate",
+    "rt_prolonged_struggle",
+    "log_attempt_count_norm",
+    "att_zero_hint_first",
+    "att_first_try",
+    "att_multi_retry",
+    "is_main_challenge",
+    "is_multiple_choice",
+    "is_open_response",
+    "is_unassisted_exam"
+  ],
+  "skill2idx": {
+    "1": 0,
+    "10": 1,
+    "103": 2,
+    "106": 3,
+    "11": 4,
+    "12": 5,
+    "13": 6,
+    "14": 7,
+    "15": 8,
+    "16": 9,
+    "163": 10,
+    "165": 11,
+    "166": 12,
+    "17": 13,
+    "173": 14,
+    "174": 15,
+    "18": 16,
+    "181": 17,
+    "182": 18,
+    "184": 19,
+    "186": 20,
+    "192": 21,
+    "196": 22,
+    "197": 23,
+    "198": 24,
+    "2": 25,
+    "202": 26,
+    "203": 27,
+    "204": 28,
+    "209": 29,
+    "21": 30,
+    "212": 31,
+    "213": 32,
+    "214": 33,
+    "217": 34,
+    "218": 35,
+    "22": 36,
+    "220": 37,
+    "222": 38,
+    "223": 39,
+    "224": 40,
+    "226": 41,
+    "233": 42,
+    "238": 43,
+    "24": 44,
+    "25": 45,
+    "26": 46,
+    "27": 47,
+    "276": 48,
+    "277": 49,
+    "278": 50,
+    "279": 51,
+    "280": 52,
+    "281": 53,
+    "283": 54,
+    "288": 55,
+    "290": 56,
+    "294": 57,
+    "295": 58,
+    "296": 59,
+    "297": 60,
+    "298": 61,
+    "301": 62,
+    "304": 63,
+    "307": 64,
+    "309": 65,
+    "310": 66,
+    "311": 67,
+    "312": 68,
+    "314": 69,
+    "315": 70,
+    "316": 71,
+    "317": 72,
+    "32": 73,
+    "320": 74,
+    "323": 75,
+    "33": 76,
+    "333": 77,
+    "336": 78,
+    "337": 79,
+    "338": 80,
+    "34": 81,
+    "340": 82,
+    "35": 83,
+    "350": 84,
+    "36": 85,
+    "366": 86,
+    "370": 87,
+    "371": 88,
+    "373": 89,
+    "374": 90,
+    "381": 91,
+    "39": 92,
+    "4": 93,
+    "40": 94,
+    "41": 95,
+    "42": 96,
+    "43": 97,
+    "46": 98,
+    "47": 99,
+    "48": 100,
+    "49": 101,
+    "5": 102,
+    "50": 103,
+    "51": 104,
+    "52": 105,
+    "53": 106,
+    "54": 107,
+    "58": 108,
+    "6": 109,
+    "61": 110,
+    "62": 111,
+    "63": 112,
+    "64": 113,
+    "65": 114,
+    "67": 115,
+    "69": 116,
+    "7": 117,
+    "70": 118,
+    "74": 119,
+    "75": 120,
+    "76": 121,
+    "77": 122,
+    "78": 123,
+    "79": 124,
+    "8": 125,
+    "80": 126,
+    "81": 127,
+    "82": 128,
+    "83": 129,
+    "84": 130,
+    "85": 131,
+    "86": 132,
+    "88": 133,
+    "9": 134,
+    "90": 135,
+    "92": 136,
+    "95": 137
+  },
+  "skill_metadata": {
+    "0": {
+      "raw_skill_id": "1",
+      "name": "Box and Whisker",
+      "attempts": 5762,
+      "empirical_accuracy": 0.7215
+    },
+    "1": {
+      "raw_skill_id": "10",
+      "name": "Probability Simple",
+      "attempts": 11786,
+      "empirical_accuracy": 0.7064
+    },
+    "2": {
+      "raw_skill_id": "103",
+      "name": "Graph Shape",
+      "attempts": 3116,
+      "empirical_accuracy": 0.6698
+    },
+    "3": {
+      "raw_skill_id": "106",
+      "name": "Graph Shape",
+      "attempts": 667,
+      "empirical_accuracy": 0.5247
+    },
+    "4": {
+      "raw_skill_id": "11",
+      "name": "Percent Of",
+      "attempts": 7864,
+      "empirical_accuracy": 0.6595
+    },
+    "5": {
+      "raw_skill_id": "12",
+      "name": "Mean",
+      "attempts": 5374,
+      "empirical_accuracy": 0.4857
+    },
+    "6": {
+      "raw_skill_id": "13",
+      "name": "Median",
+      "attempts": 5584,
+      "empirical_accuracy": 0.5761
+    },
+    "7": {
+      "raw_skill_id": "14",
+      "name": "Mode",
+      "attempts": 858,
+      "empirical_accuracy": 0.711
+    },
+    "8": {
+      "raw_skill_id": "15",
+      "name": "Range",
+      "attempts": 2833,
+      "empirical_accuracy": 0.6498
+    },
+    "9": {
+      "raw_skill_id": "16",
+      "name": "Counting Methods",
+      "attempts": 9854,
+      "empirical_accuracy": 0.4444
+    },
+    "10": {
+      "raw_skill_id": "163",
+      "name": "Absolute Value",
+      "attempts": 212,
+      "empirical_accuracy": 0.5802
+    },
+    "11": {
+      "raw_skill_id": "165",
+      "name": "Algebraic Simplification",
+      "attempts": 771,
+      "empirical_accuracy": 0.4877
+    },
+    "12": {
+      "raw_skill_id": "166",
+      "name": "Algebraic Solving",
+      "attempts": 818,
+      "empirical_accuracy": 0.3521
+    },
+    "13": {
+      "raw_skill_id": "17",
+      "name": "Probability Compound",
+      "attempts": 4292,
+      "empirical_accuracy": 0.5457
+    },
+    "14": {
+      "raw_skill_id": "173",
+      "name": "Choose an Equation from Given Information",
+      "attempts": 182,
+      "empirical_accuracy": 0.8022
+    },
+    "15": {
+      "raw_skill_id": "174",
+      "name": "Circle Graph",
+      "attempts": 93,
+      "empirical_accuracy": 0.6882
+    },
+    "16": {
+      "raw_skill_id": "18",
+      "name": "Probability Simple",
+      "attempts": 7401,
+      "empirical_accuracy": 0.7977
+    },
+    "17": {
+      "raw_skill_id": "181",
+      "name": "Exponents",
+      "attempts": 69,
+      "empirical_accuracy": 0.8986
+    },
+    "18": {
+      "raw_skill_id": "182",
+      "name": "Formulate Linear Equation from Points",
+      "attempts": 21,
+      "empirical_accuracy": 0.619
+    },
+    "19": {
+      "raw_skill_id": "184",
+      "name": "Geometric Definitions",
+      "attempts": 120,
+      "empirical_accuracy": 0.425
+    },
+    "20": {
+      "raw_skill_id": "186",
+      "name": "Histogram as Table or Graph",
+      "attempts": 58,
+      "empirical_accuracy": 0.6379
+    },
+    "21": {
+      "raw_skill_id": "192",
+      "name": "Line of Best-Fit",
+      "attempts": 713,
+      "empirical_accuracy": 0.5905
+    },
+    "22": {
+      "raw_skill_id": "196",
+      "name": "Mean",
+      "attempts": 387,
+      "empirical_accuracy": 0.7726
+    },
+    "23": {
+      "raw_skill_id": "197",
+      "name": "Mean-Median-Mode-Range Differentiation",
+      "attempts": 107,
+      "empirical_accuracy": 0.8131
+    },
+    "24": {
+      "raw_skill_id": "198",
+      "name": "Median",
+      "attempts": 123,
+      "empirical_accuracy": 0.8293
+    },
+    "25": {
+      "raw_skill_id": "2",
+      "name": "Circle Graph",
+      "attempts": 10449,
+      "empirical_accuracy": 0.4553
+    },
+    "26": {
+      "raw_skill_id": "202",
+      "name": "Pattern Finding",
+      "attempts": 292,
+      "empirical_accuracy": 0.7979
+    },
+    "27": {
+      "raw_skill_id": "203",
+      "name": "Percent Discount",
+      "attempts": 171,
+      "empirical_accuracy": 0.2281
+    },
+    "28": {
+      "raw_skill_id": "204",
+      "name": "Percents",
+      "attempts": 482,
+      "empirical_accuracy": 0.5228
+    },
+    "29": {
+      "raw_skill_id": "209",
+      "name": "Properties of Numbers",
+      "attempts": 138,
+      "empirical_accuracy": 0.4565
+    },
+    "30": {
+      "raw_skill_id": "21",
+      "name": "Sum of Interior Angles Figures with more than 3 sides",
+      "attempts": 2093,
+      "empirical_accuracy": 0.4978
+    },
+    "31": {
+      "raw_skill_id": "212",
+      "name": "Proportion",
+      "attempts": 214,
+      "empirical_accuracy": 0.3364
+    },
+    "32": {
+      "raw_skill_id": "213",
+      "name": "Pythagorean Theorem",
+      "attempts": 2453,
+      "empirical_accuracy": 0.5801
+    },
+    "33": {
+      "raw_skill_id": "214",
+      "name": "Quadratic Equation Solving",
+      "attempts": 90,
+      "empirical_accuracy": 0.2111
+    },
+    "34": {
+      "raw_skill_id": "217",
+      "name": "Rate",
+      "attempts": 268,
+      "empirical_accuracy": 0.6642
+    },
+    "35": {
+      "raw_skill_id": "218",
+      "name": "Ratio",
+      "attempts": 98,
+      "empirical_accuracy": 0.5918
+    },
+    "36": {
+      "raw_skill_id": "22",
+      "name": "Sum of Interior Angles Triangle",
+      "attempts": 984,
+      "empirical_accuracy": 0.5711
+    },
+    "37": {
+      "raw_skill_id": "220",
+      "name": "Similar Figures",
+      "attempts": 78,
+      "empirical_accuracy": 0.9103
+    },
+    "38": {
+      "raw_skill_id": "222",
+      "name": "Solving Inequalities",
+      "attempts": 43,
+      "empirical_accuracy": 0.6047
+    },
+    "39": {
+      "raw_skill_id": "223",
+      "name": "Solving System of Equation",
+      "attempts": 205,
+      "empirical_accuracy": 0.6195
+    },
+    "40": {
+      "raw_skill_id": "224",
+      "name": "Square Roots",
+      "attempts": 471,
+      "empirical_accuracy": 0.7898
+    },
+    "41": {
+      "raw_skill_id": "226",
+      "name": "Substitution",
+      "attempts": 374,
+      "empirical_accuracy": 0.5187
+    },
+    "42": {
+      "raw_skill_id": "233",
+      "name": "Transformation",
+      "attempts": 878,
+      "empirical_accuracy": 0.6036
+    },
+    "43": {
+      "raw_skill_id": "238",
+      "name": "Volume of 3D Objects",
+      "attempts": 180,
+      "empirical_accuracy": 0.3722
+    },
+    "44": {
+      "raw_skill_id": "24",
+      "name": "Congruence",
+      "attempts": 1452,
+      "empirical_accuracy": 0.7101
+    },
+    "45": {
+      "raw_skill_id": "25",
+      "name": "Supplementary Angles",
+      "attempts": 3552,
+      "empirical_accuracy": 0.7007
+    },
+    "46": {
+      "raw_skill_id": "26",
+      "name": "Angles on Parallel Lines Cut by a Transversal",
+      "attempts": 435,
+      "empirical_accuracy": 0.8138
+    },
+    "47": {
+      "raw_skill_id": "27",
+      "name": "Pythagorean Theorem",
+      "attempts": 9387,
+      "empirical_accuracy": 0.6275
+    },
+    "48": {
+      "raw_skill_id": "276",
+      "name": "Multiplication and Division Positive Decimals",
+      "attempts": 6486,
+      "empirical_accuracy": 0.5893
+    },
+    "49": {
+      "raw_skill_id": "277",
+      "name": "Addition and Subtraction Integers",
+      "attempts": 24656,
+      "empirical_accuracy": 0.6548
+    },
+    "50": {
+      "raw_skill_id": "278",
+      "name": "Addition and Subtraction Positive Decimals",
+      "attempts": 6521,
+      "empirical_accuracy": 0.5927
+    },
+    "51": {
+      "raw_skill_id": "279",
+      "name": "Multiplication and Division Integers",
+      "attempts": 13363,
+      "empirical_accuracy": 0.8351
+    },
+    "52": {
+      "raw_skill_id": "280",
+      "name": "Addition and Subtraction Fractions",
+      "attempts": 16359,
+      "empirical_accuracy": 0.6684
+    },
+    "53": {
+      "raw_skill_id": "281",
+      "name": "Properties and Classification Triangles",
+      "attempts": 1133,
+      "empirical_accuracy": 0.6108
+    },
+    "54": {
+      "raw_skill_id": "283",
+      "name": "Properties and Classification Quadrilaterals",
+      "attempts": 30,
+      "empirical_accuracy": 0.5
+    },
+    "55": {
+      "raw_skill_id": "288",
+      "name": "Properties and Classification Rectangular Prisms",
+      "attempts": 829,
+      "empirical_accuracy": 0.93
+    },
+    "56": {
+      "raw_skill_id": "290",
+      "name": "Reflection",
+      "attempts": 88,
+      "empirical_accuracy": 0.6705
+    },
+    "57": {
+      "raw_skill_id": "294",
+      "name": "Area Irregular Figure",
+      "attempts": 4061,
+      "empirical_accuracy": 0.6257
+    },
+    "58": {
+      "raw_skill_id": "295",
+      "name": "Area Parallelogram",
+      "attempts": 97,
+      "empirical_accuracy": 0.7835
+    },
+    "59": {
+      "raw_skill_id": "296",
+      "name": "Area Rectangle",
+      "attempts": 172,
+      "empirical_accuracy": 0.5174
+    },
+    "60": {
+      "raw_skill_id": "297",
+      "name": "Area Trapezoid",
+      "attempts": 98,
+      "empirical_accuracy": 0.5
+    },
+    "61": {
+      "raw_skill_id": "298",
+      "name": "Area Triangle",
+      "attempts": 98,
+      "empirical_accuracy": 0.6122
+    },
+    "62": {
+      "raw_skill_id": "301",
+      "name": "Surface Area Rectangular Prism",
+      "attempts": 1251,
+      "empirical_accuracy": 0.5116
+    },
+    "63": {
+      "raw_skill_id": "304",
+      "name": "Volume Prism",
+      "attempts": 615,
+      "empirical_accuracy": 0.7024
+    },
+    "64": {
+      "raw_skill_id": "307",
+      "name": "Volume Rectangular Prism",
+      "attempts": 137,
+      "empirical_accuracy": 0.5912
+    },
+    "65": {
+      "raw_skill_id": "309",
+      "name": "Order of Operations +-/* () positive reals",
+      "attempts": 180,
+      "empirical_accuracy": 0.8278
+    },
+    "66": {
+      "raw_skill_id": "310",
+      "name": "Order of Operations All",
+      "attempts": 187,
+      "empirical_accuracy": 0.4973
+    },
+    "67": {
+      "raw_skill_id": "311",
+      "name": "Equation Solving Two or Fewer Steps",
+      "attempts": 167,
+      "empirical_accuracy": 0.7964
+    },
+    "68": {
+      "raw_skill_id": "312",
+      "name": "Distributive Property",
+      "attempts": 1956,
+      "empirical_accuracy": 0.6626
+    },
+    "69": {
+      "raw_skill_id": "314",
+      "name": "Angles - Obtuse Acute and Right",
+      "attempts": 76,
+      "empirical_accuracy": 0.8158
+    },
+    "70": {
+      "raw_skill_id": "315",
+      "name": "Parallel and Perpendicular Lines",
+      "attempts": 594,
+      "empirical_accuracy": 0.3098
+    },
+    "71": {
+      "raw_skill_id": "316",
+      "name": "Expanded Notation",
+      "attempts": 5,
+      "empirical_accuracy": 0.6
+    },
+    "72": {
+      "raw_skill_id": "317",
+      "name": "Greatest Common Factor",
+      "attempts": 143,
+      "empirical_accuracy": 0.5245
+    },
+    "73": {
+      "raw_skill_id": "32",
+      "name": "Nets of 3D Figures",
+      "attempts": 2535,
+      "empirical_accuracy": 0.8158
+    },
+    "74": {
+      "raw_skill_id": "320",
+      "name": "Equal As Balance Concept",
+      "attempts": 162,
+      "empirical_accuracy": 0.7407
+    },
+    "75": {
+      "raw_skill_id": "323",
+      "name": "Write Linear Equation from Situation",
+      "attempts": 942,
+      "empirical_accuracy": 0.724
+    },
+    "76": {
+      "raw_skill_id": "33",
+      "name": "Knowing English and Metric Terms",
+      "attempts": 402,
+      "empirical_accuracy": 0.4776
+    },
+    "77": {
+      "raw_skill_id": "333",
+      "name": "Distributive Property",
+      "attempts": 77,
+      "empirical_accuracy": 0.6623
+    },
+    "78": {
+      "raw_skill_id": "336",
+      "name": "Finding y-intercept from Linear Equation",
+      "attempts": 76,
+      "empirical_accuracy": 0.8421
+    },
+    "79": {
+      "raw_skill_id": "337",
+      "name": "Finding y-intercept from Linear Situation",
+      "attempts": 184,
+      "empirical_accuracy": 0.3587
+    },
+    "80": {
+      "raw_skill_id": "338",
+      "name": "Combining Like Terms",
+      "attempts": 253,
+      "empirical_accuracy": 0.4822
+    },
+    "81": {
+      "raw_skill_id": "34",
+      "name": "Unit Conversion Within a System",
+      "attempts": 5962,
+      "empirical_accuracy": 0.4604
+    },
+    "82": {
+      "raw_skill_id": "340",
+      "name": "Definition Commutative Associative",
+      "attempts": 2246,
+      "empirical_accuracy": 0.6215
+    },
+    "83": {
+      "raw_skill_id": "35",
+      "name": "Linear Area Volume Conversion",
+      "attempts": 1497,
+      "empirical_accuracy": 0.5364
+    },
+    "84": {
+      "raw_skill_id": "350",
+      "name": "Solving Systems of Equations",
+      "attempts": 256,
+      "empirical_accuracy": 0.6445
+    },
+    "85": {
+      "raw_skill_id": "36",
+      "name": "Unit Conversion Standard to Metric",
+      "attempts": 235,
+      "empirical_accuracy": 0.4511
+    },
+    "86": {
+      "raw_skill_id": "366",
+      "name": "Composition of functions",
+      "attempts": 244,
+      "empirical_accuracy": 0.5082
+    },
+    "87": {
+      "raw_skill_id": "370",
+      "name": "Recognizing Equivalent Expressions",
+      "attempts": 1348,
+      "empirical_accuracy": 0.6254
+    },
+    "88": {
+      "raw_skill_id": "371",
+      "name": "Writing Equivalent Expressions",
+      "attempts": 125,
+      "empirical_accuracy": 0.632
+    },
+    "89": {
+      "raw_skill_id": "373",
+      "name": "Graphing Equations",
+      "attempts": 499,
+      "empirical_accuracy": 0.8216
+    },
+    "90": {
+      "raw_skill_id": "374",
+      "name": "Finding Max and Min from an Equation",
+      "attempts": 39,
+      "empirical_accuracy": 0.3333
+    },
+    "91": {
+      "raw_skill_id": "381",
+      "name": "Recognize Linear Pattern",
+      "attempts": 201,
+      "empirical_accuracy": 0.6667
+    },
+    "92": {
+      "raw_skill_id": "39",
+      "name": "Area Circle",
+      "attempts": 2806,
+      "empirical_accuracy": 0.5292
+    },
+    "93": {
+      "raw_skill_id": "4",
+      "name": "Histogram as Table or Graph",
+      "attempts": 3560,
+      "empirical_accuracy": 0.5382
+    },
+    "94": {
+      "raw_skill_id": "40",
+      "name": "Circumference",
+      "attempts": 4043,
+      "empirical_accuracy": 0.6265
+    },
+    "95": {
+      "raw_skill_id": "41",
+      "name": "Definition Pi",
+      "attempts": 68,
+      "empirical_accuracy": 0.7059
+    },
+    "96": {
+      "raw_skill_id": "42",
+      "name": "Perimeter of a Polygon",
+      "attempts": 3175,
+      "empirical_accuracy": 0.6054
+    },
+    "97": {
+      "raw_skill_id": "43",
+      "name": "Multiplication and Division Positive Decimals",
+      "attempts": 544,
+      "empirical_accuracy": 0.4614
+    },
+    "98": {
+      "raw_skill_id": "46",
+      "name": "Similar Figures",
+      "attempts": 7498,
+      "empirical_accuracy": 0.6635
+    },
+    "99": {
+      "raw_skill_id": "47",
+      "name": "Conversion of Fraction Decimals Percents",
+      "attempts": 24059,
+      "empirical_accuracy": 0.6223
+    },
+    "100": {
+      "raw_skill_id": "48",
+      "name": "Equivalent Fractions",
+      "attempts": 2827,
+      "empirical_accuracy": 0.4687
+    },
+    "101": {
+      "raw_skill_id": "49",
+      "name": "Ordering Fractions",
+      "attempts": 10920,
+      "empirical_accuracy": 0.7473
+    },
+    "102": {
+      "raw_skill_id": "5",
+      "name": "Number Line",
+      "attempts": 2179,
+      "empirical_accuracy": 0.603
+    },
+    "103": {
+      "raw_skill_id": "50",
+      "name": "Ordering Fractions",
+      "attempts": 8860,
+      "empirical_accuracy": 0.7626
+    },
+    "104": {
+      "raw_skill_id": "51",
+      "name": "Ordering Integers",
+      "attempts": 4311,
+      "empirical_accuracy": 0.7963
+    },
+    "105": {
+      "raw_skill_id": "52",
+      "name": "Ordering Whole Numbers",
+      "attempts": 334,
+      "empirical_accuracy": 0.6587
+    },
+    "106": {
+      "raw_skill_id": "53",
+      "name": "Ordering Real Numbers",
+      "attempts": 123,
+      "empirical_accuracy": 0.8049
+    },
+    "107": {
+      "raw_skill_id": "54",
+      "name": "Rounding",
+      "attempts": 2708,
+      "empirical_accuracy": 0.7242
+    },
+    "108": {
+      "raw_skill_id": "58",
+      "name": "Addition Whole Numbers",
+      "attempts": 5897,
+      "empirical_accuracy": 0.7619
+    },
+    "109": {
+      "raw_skill_id": "6",
+      "name": "Line Plot",
+      "attempts": 1088,
+      "empirical_accuracy": 0.6287
+    },
+    "110": {
+      "raw_skill_id": "61",
+      "name": "Division Fractions",
+      "attempts": 7934,
+      "empirical_accuracy": 0.6088
+    },
+    "111": {
+      "raw_skill_id": "62",
+      "name": "Division Whole Numbers",
+      "attempts": 2191,
+      "empirical_accuracy": 0.6002
+    },
+    "112": {
+      "raw_skill_id": "63",
+      "name": "Estimation",
+      "attempts": 2712,
+      "empirical_accuracy": 0.7105
+    },
+    "113": {
+      "raw_skill_id": "64",
+      "name": "Fraction Of",
+      "attempts": 315,
+      "empirical_accuracy": 0.4286
+    },
+    "114": {
+      "raw_skill_id": "65",
+      "name": "Least Common Multiple",
+      "attempts": 4867,
+      "empirical_accuracy": 0.6137
+    },
+    "115": {
+      "raw_skill_id": "67",
+      "name": "Multiplication Fractions",
+      "attempts": 8076,
+      "empirical_accuracy": 0.6664
+    },
+    "116": {
+      "raw_skill_id": "69",
+      "name": "Multiplication Whole Numbers",
+      "attempts": 1376,
+      "empirical_accuracy": 0.6315
+    },
+    "117": {
+      "raw_skill_id": "7",
+      "name": "Mean",
+      "attempts": 91,
+      "empirical_accuracy": 0.3956
+    },
+    "118": {
+      "raw_skill_id": "70",
+      "name": "Percent Of",
+      "attempts": 8538,
+      "empirical_accuracy": 0.5295
+    },
+    "119": {
+      "raw_skill_id": "74",
+      "name": "Subtraction Whole Numbers",
+      "attempts": 5540,
+      "empirical_accuracy": 0.6401
+    },
+    "120": {
+      "raw_skill_id": "75",
+      "name": "Square Root",
+      "attempts": 4812,
+      "empirical_accuracy": 0.7587
+    },
+    "121": {
+      "raw_skill_id": "76",
+      "name": "Finding Fractions and Ratio",
+      "attempts": 6279,
+      "empirical_accuracy": 0.488
+    },
+    "122": {
+      "raw_skill_id": "77",
+      "name": "Finding Percents",
+      "attempts": 13044,
+      "empirical_accuracy": 0.5368
+    },
+    "123": {
+      "raw_skill_id": "78",
+      "name": "Percent Increase or Decrease",
+      "attempts": 795,
+      "empirical_accuracy": 0.3623
+    },
+    "124": {
+      "raw_skill_id": "79",
+      "name": "Proportion",
+      "attempts": 22338,
+      "empirical_accuracy": 0.5896
+    },
+    "125": {
+      "raw_skill_id": "8",
+      "name": "Scatter Plot",
+      "attempts": 4260,
+      "empirical_accuracy": 0.7585
+    },
+    "126": {
+      "raw_skill_id": "80",
+      "name": "Scale Factor",
+      "attempts": 1401,
+      "empirical_accuracy": 0.469
+    },
+    "127": {
+      "raw_skill_id": "81",
+      "name": "Unit Rate",
+      "attempts": 5794,
+      "empirical_accuracy": 0.5116
+    },
+    "128": {
+      "raw_skill_id": "82",
+      "name": "Scientific Notation",
+      "attempts": 4637,
+      "empirical_accuracy": 0.6931
+    },
+    "129": {
+      "raw_skill_id": "83",
+      "name": "Divisibility",
+      "attempts": 6573,
+      "empirical_accuracy": 0.565
+    },
+    "130": {
+      "raw_skill_id": "84",
+      "name": "Prime Number",
+      "attempts": 1302,
+      "empirical_accuracy": 0.7803
+    },
+    "131": {
+      "raw_skill_id": "85",
+      "name": "Absolute Value",
+      "attempts": 4681,
+      "empirical_accuracy": 0.8035
+    },
+    "132": {
+      "raw_skill_id": "86",
+      "name": "Exponents",
+      "attempts": 7425,
+      "empirical_accuracy": 0.7472
+    },
+    "133": {
+      "raw_skill_id": "88",
+      "name": "Inverse Relations",
+      "attempts": 183,
+      "empirical_accuracy": 0.5355
+    },
+    "134": {
+      "raw_skill_id": "9",
+      "name": "Mode",
+      "attempts": 8027,
+      "empirical_accuracy": 0.6568
+    },
+    "135": {
+      "raw_skill_id": "90",
+      "name": "Picking Equation and Expression From Choices",
+      "attempts": 2117,
+      "empirical_accuracy": 0.5598
+    },
+    "136": {
+      "raw_skill_id": "92",
+      "name": "Pattern Finding",
+      "attempts": 7795,
+      "empirical_accuracy": 0.5414
+    },
+    "137": {
+      "raw_skill_id": "95",
+      "name": "Substitution",
+      "attempts": 4388,
+      "empirical_accuracy": 0.5428
+    }
+  }
+}

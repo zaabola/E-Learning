@@ -1,0 +1,608 @@
+{
+  "course_id": "vision_yolo_ocr",
+  "title": "Deep Learning Vision: CNNs, YOLO & OCR",
+  "subtitle": "Object Detection, Feature Pyramids, CRNN/CTC & End-to-End Vision Systems",
+  "mentor": "Prof. Ada (Willowbrook Vision Lab)",
+  "concepts": [
+    {
+      "concept_id": 0,
+      "title": "CNN Backbones, Stride & Feature Pyramids (FPN)",
+      "short_title": "CNNs & FPN",
+      "prereqs": [],
+      "podcast_audio": "course_material/vision_yolo_ocr/audio/hint_c0.wav",
+      "podcast_hint": "[Podcast Clip 00:45 - 01:00] \"Deep stride-32 CNN layers understand whole objects, while shallow stride-8 layers keep sharp pixel edges. A Feature Pyramid Network fuses both so tiny distant targets never vanish!\"",
+      "summary_bullets": [
+        "3x3 convolutions share weights across (H, W), preserving spatial locality with far fewer parameters than dense layers.",
+        "Stride = 2 halves width and height (4x fewer pixels) while expanding each neuron's receptive field.",
+        "Shallow layers keep fine spatial detail; deep layers capture high-level semantics.",
+        "Feature Pyramid Networks (FPN / PANet) upsample deep semantic maps and fuse them via 1x1 lateral connections with shallow high-res maps."
+      ],
+      "easy_mc": [
+        {
+          "question": "Why are Convolutional Neural Networks (CNNs) vastly more parameter-efficient on images than fully connected layers?",
+          "choices": [
+            "Small filters share the same learnable weights across every spatial location instead of connecting every pixel to every neuron",
+            "CNNs convert all RGB images into 1-pixel grayscale scalars before training",
+            "CNNs contain zero learnable weights and rely only on sorting pixels",
+            "CNNs delete 90% of input channels randomly at every forward pass"
+          ],
+          "correct_idx": 0,
+          "reference": "CNNs enforce local connectivity and spatial weight sharing, reusing small kernels across the entire image rather than learning separate weights per pixel."
+        },
+        {
+          "question": "What happens to a 64x64 feature map when passed through a 3x3 convolution with padding=1 and stride=2?",
+          "choices": [
+            "Its spatial resolution halves to 32x32 while deeper features cover a wider receptive field",
+            "Its spatial resolution doubles to 128x128",
+            "All channel dimensions are reduced to zero",
+            "The image rotates by 90 degrees automatically"
+          ],
+          "correct_idx": 0,
+          "reference": "Applying stride 2 samples every second spatial position, halving height and width from 64x64 to 32x32 and increasing receptive field coverage."
+        },
+        {
+          "question": "What primary problem does a Feature Pyramid Network (FPN) solve inside modern object detectors?",
+          "choices": [
+            "Detecting objects reliably across drastically different scales by fusing deep semantic features with shallow high-resolution features",
+            "Replacing GPU matrix multiplication with CPU text sorting",
+            "Eliminating all activation functions from the backbone",
+            "Converting bounding boxes into audio waveforms"
+          ],
+          "correct_idx": 0,
+          "reference": "FPN combines upsampled deep semantic feature maps with high-resolution shallow maps via lateral skip connections so both small and large objects are detected."
+        },
+        {
+          "question": "What role does a 1x1 convolution play inside CNN backbones and FPN lateral connections?",
+          "choices": [
+            "It mixes information across channels and adjusts channel depth (e.g., 512 -> 256) without changing spatial HxW size",
+            "It blurs a 15x15 neighborhood of pixels without touching channels",
+            "It crops out the center pixel of the entire image",
+            "It disables gradient flow during backpropagation"
+          ],
+          "correct_idx": 0,
+          "reference": "A 1x1 convolution acts as a learnable per-pixel linear projection across channels to align or compress channel dimensions while preserving HxW resolution."
+        }
+      ],
+      "medium_mc": [
+        {
+          "question": "Why do tiny objects (e.g., 10x10 pixels) often disappear if a detector only predicts from the deepest stride-32 backbone layer?",
+          "choices": [
+            "At stride 32, a 10x10 object shrinks to less than a single feature cell (0.31 px), erasing its fine spatial localization",
+            "Stride-32 layers only detect grayscale pixels and ignore RGB color",
+            "Deep layers have too small a receptive field to see 10x10 pixels",
+            "Stride 32 multiplies image resolution by 32x and overflows memory"
+          ],
+          "correct_idx": 0,
+          "reference": "Downsampling by 32x collapses an object smaller than 32 pixels into a sub-pixel footprint, washing out its spatial features unless higher-resolution P3/P2 pyramid maps are used."
+        },
+        {
+          "question": "How does PANet (Path Aggregation Network, used in YOLOv4-v11 necks) extend a classic top-down FPN?",
+          "choices": [
+            "It adds an extra bottom-up pathway after top-down fusion so crisp low-level localization signals reach large-object heads directly",
+            "It removes all skip connections and uses a single flat layer",
+            "It freezes the CNN backbone to random untrained weights",
+            "It restricts detection to a single fixed box size"
+          ],
+          "correct_idx": 0,
+          "reference": "PANet augments FPN's top-down semantic pathway with a bottom-up path so accurate low-level spatial edges propagate back up to deeper multi-scale heads."
+        },
+        {
+          "question": "Using output size floor((H + 2P - K) / S) + 1, what is the output width for H=224, kernel K=7, padding P=3, stride S=2?",
+          "choices": [
+            "112",
+            "224",
+            "56",
+            "218"
+          ],
+          "correct_idx": 0,
+          "reference": "Substituting into floor((224 + 6 - 7) / 2) + 1 gives floor(223 / 2) + 1 = 111 + 1 = 112."
+        },
+        {
+          "question": "Why do CSP (Cross-Stage Partial) / C2f blocks in YOLO backbones split feature channels into two paths before concatenating?",
+          "choices": [
+            "To reuse diverse gradient paths while cutting redundant computation and memory cost",
+            "To discard half the dataset labels during training",
+            "To force every predicted box to be a square",
+            "To convert 2D images into 1D audio spectrograms"
+          ],
+          "correct_idx": 0,
+          "reference": "CSP and C2f blocks route part of the channels through bottleneck convolutions and part directly as a shortcut, enriching gradient flow while reducing FLOPs."
+        }
+      ],
+      "boss_open": [
+        {
+          "question": "Explain the trade-off between shallow CNN layers and deep CNN layers, and how a Feature Pyramid Network (FPN) resolves it for multi-scale detection.",
+          "reference": "Shallow CNN layers have high spatial resolution for precise edges and small objects but weak semantic context, whereas deep layers have strong semantic meaning but coarse resolution; FPN upsamples deep features and fuses them with shallow maps via lateral connections to get both."
+        },
+        {
+          "question": "Why do tiny distant objects fail to be detected on a single stride-32 feature map, and which FPN level helps recover them?",
+          "reference": "A stride-32 feature map downsamples the image by 32 times so tiny objects shrink below one grid cell and lose spatial detail, whereas finer high-resolution pyramid levels like stride-8 (P3) or stride-4 (P2) preserve small object features."
+        },
+        {
+          "question": "In your own words, how do weight sharing and stride in CNNs work together to extract visual features efficiently?",
+          "reference": "Weight sharing slides the same small filter across the whole image to detect patterns anywhere with few parameters, while stride downsamples spatial dimensions to reduce compute and grow the receptive field."
+        }
+      ]
+    },
+    {
+      "concept_id": 1,
+      "title": "Bounding Boxes, IoU & Non-Maximum Suppression (NMS)",
+      "short_title": "Boxes, IoU & NMS",
+      "prereqs": [],
+      "podcast_audio": "course_material/vision_yolo_ocr/audio/hint_c1.wav",
+      "podcast_hint": "[Podcast Clip 02:30 - 02:45] \"IoU divides the overlap area of two boxes by their total union area. Then Non-Maximum Suppression keeps the sharpest high-confidence box and deletes overlapping duplicates!\"",
+      "summary_bullets": [
+        "IoU = Area of Overlap / Area of Union, ranging from 0.0 (disjoint) to 1.0 (identical boxes).",
+        "Vanilla IoU loss has zero gradient when boxes do not overlap; GIoU and CIoU add center-distance and aspect-ratio terms so gradients still pull boxes together.",
+        "NMS sorts candidate boxes by confidence, keeps the top box, and suppresses same-class boxes with IoU above the NMS threshold.",
+        "COCO mAP@0.50:0.95 averages detection precision-recall AP across IoU thresholds from 0.50 to 0.95."
+      ],
+      "easy_mc": [
+        {
+          "question": "How is Intersection over Union (IoU) computed between a predicted bounding box and a ground-truth bounding box?",
+          "choices": [
+            "Area of their overlapping intersection divided by the total area of their union",
+            "Sum of their perimeter lengths multiplied by image width",
+            "Difference between their class probabilities",
+            "Euclidean distance between the top-left corner of the image and zero"
+          ],
+          "correct_idx": 0,
+          "reference": "IoU measures localization accuracy as the area of overlap between predicted and true boxes divided by their combined union area."
+        },
+        {
+          "question": "What is the exact purpose of Non-Maximum Suppression (NMS) at object detection inference?",
+          "choices": [
+            "To keep the highest-confidence box for an object and remove redundant overlapping duplicate boxes",
+            "To blur background pixels before running the CNN",
+            "To increase the number of duplicate boxes per object to 100",
+            "To convert class names into alphabetical order"
+          ],
+          "correct_idx": 0,
+          "reference": "Detectors often fire multiple neighboring boxes around the same object; NMS keeps the peak-confidence prediction and suppresses high-IoU duplicates."
+        },
+        {
+          "question": "If a predicted box and ground-truth box do not touch or overlap at all, what is their standard IoU value?",
+          "choices": [
+            "0.0",
+            "1.0",
+            "0.5",
+            "-10.0"
+          ],
+          "correct_idx": 0,
+          "reference": "When two boxes have zero intersection area, IoU = 0 / Area_union = 0.0."
+        },
+        {
+          "question": "In YOLO center-size box format (cx, cy, w, h) normalized to [0, 1], what does (0.5, 0.5, 0.2, 0.4) represent?",
+          "choices": [
+            "A box centered in the middle of the image covering 20% of image width and 40% of image height",
+            "A 0.5-pixel box at the top-left corner",
+            "Four separate class probabilities",
+            "An invalid box outside the frame"
+          ],
+          "correct_idx": 0,
+          "reference": "Normalized (cx, cy, w, h) places the box center at (50% W, 50% H) with width 0.2*W and height 0.4*H."
+        }
+      ],
+      "medium_mc": [
+        {
+          "question": "Why do YOLO detectors train with CIoU (Complete IoU) loss instead of plain (1 - IoU) loss?",
+          "choices": [
+            "Plain (1 - IoU) gives zero gradient when boxes do not overlap, whereas CIoU penalizes center distance and aspect ratio to guide disjoint boxes together",
+            "CIoU completely ignores box overlap and only checks RGB brightness",
+            "Plain IoU cannot be computed on GPUs",
+            "CIoU forces all predicted boxes to have zero width"
+          ],
+          "correct_idx": 0,
+          "reference": "When predicted and true boxes have zero overlap, IoU is flat at 0 with zero gradient; CIoU adds normalized center-distance and aspect-ratio terms so optimization still converges."
+        },
+        {
+          "question": "What happens during inference if you set the NMS IoU threshold far too LOW (e.g., iou_thresh = 0.10) in a crowded street scene?",
+          "choices": [
+            "Valid detections of nearby overlapping pedestrians get mistakenly suppressed as duplicates, hurting recall",
+            "Every grid cell outputs 100 duplicate boxes for the same car",
+            "Model weights are erased from disk",
+            "Bounding boxes become rotated polygons"
+          ],
+          "correct_idx": 0,
+          "reference": "An overly low NMS IoU threshold suppresses any neighbor box with even slight overlap (>0.10), deleting true adjacent objects in dense crowds."
+        },
+        {
+          "question": "Why is COCO's primary metric mAP@0.50:0.95 stricter than Pascal VOC's mAP@0.50?",
+          "choices": [
+            "It averages Average Precision across ten IoU thresholds up to 0.95, rewarding tight pixel-accurate box boundaries rather than loose 50% overlaps",
+            "It only evaluates on 5 images total",
+            "It ignores false positives completely",
+            "It allows wrong class labels as long as box area matches"
+          ],
+          "correct_idx": 0,
+          "reference": "Averaging AP from IoU=0.50 up to IoU=0.95 requires predicted boxes to tightly hug ground-truth borders to score high at 0.85-0.95 thresholds."
+        },
+        {
+          "question": "Two boxes each have area 100, and their overlapping intersection has area 50. What is their exact IoU?",
+          "choices": [
+            "50 / (100 + 100 - 50) = 50 / 150 = 0.333",
+            "50 / 200 = 0.250",
+            "50 / 100 = 0.500",
+            "100 / 150 = 0.667"
+          ],
+          "correct_idx": 0,
+          "reference": "Union area equals A + B - Intersection = 100 + 100 - 50 = 150, so IoU = 50 / 150 = 1/3 (0.333)."
+        }
+      ],
+      "boss_open": [
+        {
+          "question": "Walk through how Non-Maximum Suppression (NMS) cleans up raw detector predictions, and explain what happens if the NMS IoU threshold is set too low in crowded scenes.",
+          "reference": "NMS filters low-confidence boxes, picks the highest-confidence box, and removes other same-class boxes whose IoU with it exceeds a threshold; if that IoU threshold is too low, genuinely separate nearby objects that overlap get wrongly deleted."
+        },
+        {
+          "question": "Define Intersection over Union (IoU) and explain why CIoU or GIoU loss is preferred over plain (1 - IoU) during bounding box regression.",
+          "reference": "IoU divides the area of overlap between predicted and true boxes by their union area; plain 1 - IoU has zero gradient when boxes do not overlap, whereas GIoU and CIoU penalize enclosure or center distance and aspect ratio so disjoint boxes still receive gradients."
+        },
+        {
+          "question": "Explain the trade-off controlled by the confidence threshold at inference time in terms of Precision and Recall.",
+          "reference": "Raising the confidence threshold rejects uncertain boxes which increases precision (fewer false positives) but lowers recall (more missed objects), while lowering it catches more true objects (higher recall) at the cost of more false alarms."
+        }
+      ]
+    },
+    {
+      "concept_id": 2,
+      "title": "Single-Stage Real-Time Detection & YOLO",
+      "short_title": "YOLO Detection",
+      "prereqs": [0, 1],
+      "podcast_audio": "course_material/vision_yolo_ocr/audio/hint_c2.wav",
+      "podcast_hint": "[Podcast Clip 05:10 - 05:25] \"Unlike two-stage R-CNN detectors that propose regions first and classify second, YOLO divides the image into multi-scale grids and predicts boxes and classes in one single fast pass!\"",
+      "summary_bullets": [
+        "Two-stage detectors (Faster R-CNN) generate region proposals first and classify each RoI second; YOLO predicts boxes + classes densely in one pass.",
+        "On a 640x640 input, YOLO predicts at 3 FPN scales: 80x80 (stride 8, small), 40x40 (stride 16, medium), and 20x20 (stride 32, large).",
+        "Modern YOLOv8/v11 heads are anchor-free and decoupled: separate branches predict class BCE logits and (l, t, r, b) box offsets.",
+        "YOLOv10 introduced dual label assignments (one-to-many + one-to-one) to remove NMS latency during deployment."
+      ],
+      "easy_mc": [
+        {
+          "question": "What makes YOLO a 'single-stage' object detector compared to Faster R-CNN?",
+          "choices": [
+            "It predicts bounding box coordinates and class probabilities directly across spatial grid cells in one unified forward pass",
+            "It only looks at a single 1x1 pixel of the image",
+            "It requires human annotators to draw region proposals at test time",
+            "It trains for only one gradient step"
+          ],
+          "correct_idx": 0,
+          "reference": "Single-stage YOLO skips a separate Region Proposal Network + per-region cropping stage, predicting all boxes and classes simultaneously on dense feature grids."
+        },
+        {
+          "question": "On a 640x640 input image with feature strides of 8, 16, and 32, which YOLO grid resolution is responsible for detecting the SMALLEST objects?",
+          "choices": [
+            "The 80x80 high-resolution grid (stride 8)",
+            "The 20x20 coarse grid (stride 32)",
+            "A 1x1 global average pool",
+            "None of them; YOLO only uses stride 64"
+          ],
+          "correct_idx": 0,
+          "reference": "Dividing 640 by stride 8 yields a dense 80x80 feature grid with fine spatial detail tailored to small objects, while 20x20 handles large objects."
+        },
+        {
+          "question": "What does 'anchor-free' detection in modern YOLOv8 / YOLOv11 mean?",
+          "choices": [
+            "Each grid cell directly regresses distances from its center to the 4 box edges without needing pre-clustered K-means anchor box templates",
+            "The model predicts class labels only without any bounding boxes",
+            "Bounding boxes are pinned permanently to the image corners",
+            "Training runs without a loss function"
+          ],
+          "correct_idx": 0,
+          "reference": "Anchor-free YOLO heads predict (left, top, right, bottom) distances directly from positive grid points, eliminating dataset-specific anchor size tuning."
+        },
+        {
+          "question": "How does Mosaic data augmentation improve YOLO training?",
+          "choices": [
+            "It combines 4 randomly scaled training images into one composite canvas, teaching multi-scale and small-object generalization",
+            "It blurs every object until it becomes unrecognizable",
+            "It deletes all bounding box annotations",
+            "It converts training photos into black-and-white text files"
+          ],
+          "correct_idx": 0,
+          "reference": "Mosaic stitches four images together at varied scales, enriching background diversity and increasing small-object training examples per batch."
+        }
+      ],
+      "medium_mc": [
+        {
+          "question": "Why do YOLOv8 and YOLOv11 use a 'decoupled head' instead of predicting classes and box coordinates from the exact same final conv layer?",
+          "choices": [
+            "Classification wants translation-invariant semantic features while box regression needs sharp boundary-sensitive features; separating their branches boosts accuracy and convergence",
+            "A decoupled head runs on two separate computers over Wi-Fi",
+            "Predicting both from one tensor is mathematically impossible in PyTorch",
+            "It forces class scores to always equal box width"
+          ],
+          "correct_idx": 0,
+          "reference": "Classification focuses on semantic identity whereas localization focuses on exact edges; decoupling them into separate conv branches resolves feature conflict."
+        },
+        {
+          "question": "In YOLO training, why is Task-Aligned Assigner (TAL) used to select positive grid cells dynamically?",
+          "choices": [
+            "It scores candidate cells jointly by both high classification confidence AND high predicted-box IoU so the best-aligned cells supervise both heads",
+            "It assigns every single background pixel as a positive object",
+            "It picks positive cells purely by random coin flip",
+            "It ignores ground-truth boxes during training"
+          ],
+          "correct_idx": 0,
+          "reference": "Task-Aligned Assigner weights classification score and IoU together so positive supervision goes to grid points that both classify accurately and localize tightly."
+        },
+        {
+          "question": "How does YOLOv10 achieve 'NMS-free' end-to-end inference without losing training supervision?",
+          "choices": [
+            "It combines a one-to-many head for rich gradient signal during training with a consistent one-to-one head that outputs a single best box per object at inference",
+            "It sets the confidence threshold to 0.9999 so almost nothing is detected",
+            "It runs Faster R-CNN behind the scenes",
+            "It sorts pixels on the CPU after every layer"
+          ],
+          "correct_idx": 0,
+          "reference": "One-to-one label assignment teaches the inference head to emit exactly one box per object without NMS, while dual one-to-many supervision preserves rich training gradients."
+        },
+        {
+          "question": "If a YOLOv8 model processes a 640x640 image across strides 8 (80x80), 16 (40x40), and 32 (20x20) with 1 prediction per cell, how many total candidate boxes are evaluated before filtering?",
+          "choices": [
+            "80*80 + 40*40 + 20*20 = 6400 + 1600 + 400 = 8,400 boxes",
+            "640 + 640 = 1,280 boxes",
+            "20 * 20 = 400 boxes",
+            "1,000,000 boxes"
+          ],
+          "correct_idx": 0,
+          "reference": "Summing cells across the three pyramid heads gives 6,400 + 1,600 + 400 = 8,400 total anchor-free candidate predictions per frame."
+        }
+      ],
+      "boss_open": [
+        {
+          "question": "Compare two-stage detectors (like Faster R-CNN) with single-stage YOLO detectors, and explain how modern YOLO detects small, medium, and large objects in one forward pass.",
+          "reference": "Two-stage detectors first generate region proposals and then crop and classify each region separately, whereas YOLO predicts boxes and classes in a single dense pass across multi-scale FPN feature grids (strides 8, 16, and 32) for small, medium, and large objects."
+        },
+        {
+          "question": "What is the difference between anchor-based YOLO and modern anchor-free decoupled YOLO heads, and why does decoupling classification from box regression help?",
+          "reference": "Anchor-free YOLO directly regresses distances from a grid cell center to the four box edges instead of scaling predefined anchor templates, and decoupling separates semantic class features from edge-sensitive localization features so the two tasks do not conflict."
+        },
+        {
+          "question": "Explain how YOLO combines classification loss, CIoU box loss, and post-processing NMS (or one-to-one assignment) to turn raw grid tensors into clean detections.",
+          "reference": "During training YOLO optimizes binary cross-entropy for class probabilities and CIoU loss for tight bounding boxes; at inference it filters low-confidence grid cells and applies NMS (or one-to-one assignment) to remove duplicate overlapping predictions."
+        }
+      ]
+    },
+    {
+      "concept_id": 3,
+      "title": "OCR: Scene Text Detection, CRNN & CTC Loss",
+      "short_title": "OCR, CRNN & CTC",
+      "prereqs": [0],
+      "podcast_audio": "course_material/vision_yolo_ocr/audio/hint_c3.wav",
+      "podcast_hint": "[Podcast Clip 07:55 - 08:10] \"Modern OCR works in two steps: DBNet finds text polygons in the wild, then CRNN slices the cropped word into visual columns and uses CTC's blank token to decode letters without character boxes!\"",
+      "summary_bullets": [
+        "Modern OCR splits into Text Detection (DBNet / CRAFT finding word polygons) + Text Recognition (CRNN / TrOCR decoding characters).",
+        "CRNN stacks a CNN feature stem -> left-to-right column sequence -> BiLSTM/Transformer sequence encoder -> per-column character probabilities.",
+        "CTC (Connectionist Temporal Classification) aligns T visual columns to L characters (L <= T) using a special <blank> (-) token.",
+        "CTC decoding merges consecutive duplicate tokens first, then strips <blank>: 'h - e e l - l l o' -> 'hello'."
+      ],
+      "easy_mc": [
+        {
+          "question": "What are the two core stages of a modern scene Optical Character Recognition (OCR) pipeline like PaddleOCR or EasyOCR?",
+          "choices": [
+            "1) Text Detection (locating word/line bounding polygons) followed by 2) Text Recognition (decoding cropped strips into character strings)",
+            "1) Audio recording followed by 2) Speech synthesis",
+            "1) Deleting all vowels followed by 2) Random spellcheck",
+            "1) K-means clustering RGB colors followed by 2) Sobel blur"
+          ],
+          "correct_idx": 0,
+          "reference": "Scene OCR first localizes where text regions sit in the image (detection) and then transcribes each cropped text strip into characters (recognition)."
+        },
+        {
+          "question": "In a CRNN (Convolutional Recurrent Neural Network) text recognizer, what do C, R, and the output layer each do?",
+          "choices": [
+            "CNN extracts a horizontal sequence of visual feature columns, RNN/BiLSTM models character context across columns, and CTC decodes the text string",
+            "CNN translates English to French, RNN resizes the image, and NMS deletes characters",
+            "CRNN crops individual letters manually using human clicks",
+            "CRNN only recognizes single isolated digits of fixed width"
+          ],
+          "correct_idx": 0,
+          "reference": "CRNN uses a CNN stem to turn a word image into ordered vertical feature slices, a BiLSTM to capture bidirectional sequence context, and a CTC transcription layer."
+        },
+        {
+          "question": "What major annotation advantage does CTC (Connectionist Temporal Classification) loss give when training an OCR recognizer?",
+          "choices": [
+            "You only need the whole word/line text transcription per cropped image — no character-by-character bounding boxes are required!",
+            "You do not need any text labels at all (100% unsupervised)",
+            "Every character must have an exact pixel segmentation mask",
+            "It only works when every word has the exact same number of letters"
+          ],
+          "correct_idx": 0,
+          "reference": "CTC marginalizes over all valid monotonic alignments between visual columns and target characters, eliminating costly character-level bounding box annotation."
+        },
+        {
+          "question": "Using standard CTC greedy decoding (collapse consecutive duplicates, then remove '-' blanks), what string does 'c c - a - t t -' decode to?",
+          "choices": [
+            "\"cat\"",
+            "\"ccaatt\"",
+            "\"c-a-t\"",
+            "\"ct\""
+          ],
+          "correct_idx": 0,
+          "reference": "Collapsing adjacent repeats turns 'c c - a - t t -' into 'c - a - t -', and removing '-' blanks produces 'cat'."
+        }
+      ],
+      "medium_mc": [
+        {
+          "question": "In CTC decoding, why is the special <blank> ('-') token essential for spelling words with repeated letters like 'book' or 'hello'?",
+          "choices": [
+            "Without a <blank> between two 'o' emissions, collapsing consecutive duplicates would merge 'o o o o' into a single 'o' ('bok'); 'b o - o k' preserves 'book'",
+            "The <blank> token represents the ASCII spacebar between paragraphs",
+            "The <blank> token deletes the entire word when confidence is below 0.9",
+            "CTC never collapses consecutive duplicate characters"
+          ],
+          "correct_idx": 0,
+          "reference": "Because wide characters span multiple CNN columns and get collapsed, CTC requires a <blank> emission between identical adjacent characters (e.g., 'l - l') to distinguish a true double letter from one wide letter."
+        },
+        {
+          "question": "Why are polygon/segmentation text detectors like DBNet (Differentiable Binarization) preferred over axis-aligned horizontal boxes for street-scene OCR?",
+          "choices": [
+            "Curved, rotated, or perspective-skewed signage fits tightly inside arbitrary polygons, whereas axis-aligned rectangles capture huge cluttered background regions",
+            "DBNet cannot detect horizontal text at all",
+            "Axis-aligned boxes require 100x more parameters than polygons",
+            "DBNet skips CNN feature extraction completely"
+          ],
+          "correct_idx": 0,
+          "reference": "Axis-aligned boxes around diagonal or curved text include heavy background noise and neighboring lines, whereas DBNet predicts tight shrunk text kernels that expand cleanly around arbitrary orientations."
+        },
+        {
+          "question": "During CRNN feature extraction on a text line (e.g., 32x160), why do later pooling layers often downsample HEIGHT much more aggressively than WIDTH (e.g., 2x1 stride)?",
+          "choices": [
+            "Collapsing height into 1 row while preserving many horizontal width columns keeps tightly spaced narrow characters like 'i' and 'l' separated along the sequence",
+            "Because text lines are read vertically from bottom to top",
+            "Because GPU tensors cannot have height equal to 1",
+            "To limit the model to 3 characters maximum"
+          ],
+          "correct_idx": 0,
+          "reference": "Using asymmetric 2x1 pooling reduces vertical height to 1 while retaining high horizontal temporal resolution T >= L so narrow adjacent characters each get distinct feature columns."
+        },
+        {
+          "question": "Which evaluation metric specifically measures character-level OCR transcription accuracy using Levenshtein edit distance (insertions + deletions + substitutions)?",
+          "choices": [
+            "Character Error Rate (CER)",
+            "Intersection over Union (IoU)",
+            "Peak Signal-to-Noise Ratio (PSNR)",
+            "Perplexity of bounding box area"
+          ],
+          "correct_idx": 0,
+          "reference": "Character Error Rate (CER) divides minimum character edit operations (substitutions, insertions, deletions) by reference string length."
+        }
+      ],
+      "boss_open": [
+        {
+          "question": "Explain how a CRNN + CTC text recognizer reads a cropped word image without needing bounding boxes around individual characters, including the role of the CTC <blank> token.",
+          "reference": "A CNN converts the word image into a horizontal sequence of visual feature columns and a BiLSTM encodes context across columns; CTC loss aligns those columns to the target word without character boxes by collapsing repeated column predictions and using a blank token to separate true double letters."
+        },
+        {
+          "question": "Why is scene OCR split into Text Detection (like DBNet) and Text Recognition (like CRNN/TrOCR), and why do curved or tilted signs break naive axis-aligned boxes?",
+          "reference": "Text detection first isolates where text regions are in a cluttered photo so the recognizer only decodes clean cropped strips; tilted or curved text inside axis-aligned rectangles pulls in background noise and adjacent lines, whereas polygon detectors like DBNet hug arbitrary text shapes."
+        },
+        {
+          "question": "Trace what CTC decoding outputs for the column sequence 't t - r e e - e' and explain why both duplicate-collapsing and blank-removal rules are needed.",
+          "reference": "Collapsing consecutive duplicates turns 't t - r e e - e' into 't - r e - e' and removing blanks yields 'tree'; collapsing handles single characters that span multiple visual columns, while the blank between the two e's preserves the repeated letter."
+        }
+      ]
+    },
+    {
+      "concept_id": 4,
+      "title": "End-to-End YOLO + OCR Vision Pipelines & Edge Cases",
+      "short_title": "YOLO + OCR Systems",
+      "prereqs": [2, 3],
+      "podcast_audio": "course_material/vision_yolo_ocr/audio/hint_c4.wav",
+      "podcast_hint": "[Podcast Clip 10:40 - 10:55] \"In real-world license-plate or invoice pipelines, YOLO finds the target region in milliseconds, a 4-point perspective warp un-tilts the crop, and CRNN-CTC reads the crisp rectified text!\"",
+      "summary_bullets": [
+        "End-to-end ALPR / Document pipelines chain: YOLO region detection -> 4-corner perspective rectification (homography) -> CRNN/Transformer OCR.",
+        "Feeding a 40-degree skewed plate straight into CRNN scrambles vertical columns; perspective warping or STN aligns characters horizontally first.",
+        "For high-res footage with tiny plates/labels, SAHI (Slicing Aided Hyper Inference) or higher input resolution prevents stride downsampling loss.",
+        "Video pipelines boost reliability via multi-frame tracking (ByteTrack) + character confidence voting, exported to ONNX/TensorRT FP16."
+      ],
+      "easy_mc": [
+        {
+          "question": "In an Automated License Plate Recognition (ALPR) system combining YOLO and OCR, what is the optimal division of labor between the two models?",
+          "choices": [
+            "YOLO rapidly detects and crops the license plate bounding box from the full frame, and the OCR model transcribes the characters inside that crop",
+            "OCR scans every background tree and sky pixel first, and YOLO spells out the letters",
+            "YOLO trains 36 separate full-frame networks (one per letter) without cropping",
+            "Both models output audio waveforms instead of text"
+          ],
+          "correct_idx": 0,
+          "reference": "YOLO excels at fast object localization in cluttered scenes, isolating tight plate crops so the OCR recognizer focuses compute solely on high-resolution character strips."
+        },
+        {
+          "question": "Why do production YOLO + OCR pipelines apply 4-point perspective rectification (homography warp) between detection and CRNN text recognition?",
+          "choices": [
+            "To flatten skewed or angled crops into a level horizontal strip so CRNN's vertical feature columns slice cleanly through individual characters",
+            "To flip the text upside-down so it becomes harder to read",
+            "To reduce image contrast to zero",
+            "To delete the first and last characters of every plate"
+          ],
+          "correct_idx": 0,
+          "reference": "Because CRNN slices feature maps into vertical columns from left to right, un-warping perspective tilt ensures each column aligns with one character instead of cutting diagonally across lines."
+        },
+        {
+          "question": "If a 4K security camera captures tiny 18-pixel license plates and resizing the whole frame to 640x640 blurs the letters beyond recognition, what is the best pipeline design?",
+          "choices": [
+            "Detect vehicles/plates with tiled high-res inference (e.g., SAHI) and crop the plate from the ORIGINAL 4K frame before running OCR",
+            "Crop from the blurry downscaled 640x640 tensor and upscale with nearest-neighbor",
+            "Increase NMS confidence threshold to 0.99",
+            "Convert the 4K image to 64x64"
+          ],
+          "correct_idx": 0,
+          "reference": "Always map predicted bounding box coordinates back to the full-resolution source frame before cropping for OCR so fine character strokes are preserved."
+        },
+        {
+          "question": "How do real-time video YOLO + OCR systems (30 FPS) overcome temporary motion blur or glare on a single frame?",
+          "choices": [
+            "Track each object across frames (e.g., ByteTrack) and aggregate OCR predictions using confidence-weighted temporal voting",
+            "Restart model training from scratch on every blurry frame",
+            "Discard all frames with confidence below 1.00",
+            "Turn off Non-Maximum Suppression permanently"
+          ],
+          "correct_idx": 0,
+          "reference": "Multi-frame tracking links crops of the same object over time, allowing confidence-weighted majority voting or selecting the sharpest low-blur frame."
+        }
+      ],
+      "medium_mc": [
+        {
+          "question": "Suppose your YOLO + OCR invoice parser extracts `Total_Box` perfectly (mAP = 0.96), yet Character Error Rate jumps to 35% on scanned receipts rotated by 30 degrees. Where is the bottleneck and fix?",
+          "choices": [
+            "Axis-aligned cropping of rotated text feeds slanted lines into horizontal CRNN columns; add oriented boxes (YOLO-OBB) or deskew/STN rectification before OCR",
+            "YOLO's learning rate was zero during training",
+            "CIoU loss cannot detect paper documents",
+            "Decrease OCR training vocabulary to 2 letters"
+          ],
+          "correct_idx": 0,
+          "reference": "High detection mAP proves localization works, so the error stems from rotated crops violating CRNN's horizontal column assumption; oriented bounding boxes (OBB) + deskew warping fix it."
+        },
+        {
+          "question": "Why is YOLO preferred over running a dense pixel-level OCR text detector (like DBNet) across an entire 4K frame when you ONLY care about reading highway toll tags?",
+          "choices": [
+            "DBNet detects EVERY irrelevant text string in the scene (bumper stickers, billboards, shop signs), whereas class-specific YOLO isolates only the target `toll_tag` region in milliseconds",
+            "DBNet cannot run on GPUs",
+            "YOLO automatically spells every word without any OCR model",
+            "4K images contain no background clutter"
+          ],
+          "correct_idx": 0,
+          "reference": "Class-specific YOLO acts as a semantic spatial filter, ignoring irrelevant scene text and running OCR solely on target object crops for far lower latency and false alarms."
+        },
+        {
+          "question": "When deploying a YOLO + CRNN pipeline on an edge GPU (like Jetson or a 4GB laptop GPU), what benefit does exporting to TensorRT FP16 provide?",
+          "choices": [
+            "Fuses conv+batchnorm+activation layers and uses half-precision Tensor Cores, cutting VRAM and inference latency by ~2-3x with negligible accuracy loss",
+            "Automatically labels 100,000 new training images",
+            "Doubles the number of parameters in the model",
+            "Replaces CTC decoding with random sampling"
+          ],
+          "correct_idx": 0,
+          "reference": "Layer fusion (folding BatchNorm into Conv weights) and FP16 Tensor Core execution dramatically accelerate throughput and shrink memory footprint while preserving mAP and CER."
+        },
+        {
+          "question": "If YOLO clips 3 pixels off the left and right edges of detected license plates, cutting the first and last characters in half for OCR, what practical post-processing fix immediately helps?",
+          "choices": [
+            "Apply a small symmetric padding margin (e.g., expanding crop width/height by 5-10% clamped to image bounds) before passing the crop to OCR",
+            "Shrink every predicted bounding box by 50%",
+            "Remove the <blank> token from CTC",
+            "Lower the image resolution to 128x128"
+          ],
+          "correct_idx": 0,
+          "reference": "Slightly padding predicted YOLO bounding boxes before cropping from the high-res image prevents tight box edges from truncating boundary characters."
+        }
+      ],
+      "boss_open": [
+        {
+          "question": "Design an end-to-end Deep Learning pipeline to read tilted vehicle license plates from 4K traffic cameras in real time, explaining how YOLO, geometric rectification, and CRNN-CTC work together.",
+          "reference": "First YOLO (or YOLO-Pose/OBB) detects the license plate region, then the crop is extracted from the original high-resolution 4K frame with slight margin padding and un-tilted via a 4-point perspective homography warp, and finally CRNN with CTC loss decodes the rectified strip into characters with multi-frame voting."
+        },
+        {
+          "question": "Diagnose two common real-world failure modes in a chained YOLO + OCR system (such as angled text or downscaling tiny text) and explain how to fix each one.",
+          "reference": "Downscaling full 4K frames blurs tiny text, which is fixed by tiled inference (SAHI) and cropping from the original full-resolution image; angled or perspective-skewed crops scramble CRNN's vertical columns, which is fixed with oriented boxes (YOLO-OBB) or 4-corner perspective rectification before OCR."
+        },
+        {
+          "question": "Why is chaining a class-specific YOLO detector before OCR better than running full-image OCR alone on cluttered scenes like invoices or street views?",
+          "reference": "Class-specific YOLO rapidly filters out irrelevant background text (like ads or boilerplate) and localizes only the exact target fields (such as invoice totals or license plates), dramatically reducing OCR compute cost and preventing false text extractions."
+        }
+      ]
+    }
+  ]
+}

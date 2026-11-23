@@ -180,11 +180,7 @@ class QwenVLDiagramEngine:
             except Exception:
                 quant_config = None
 
-        self.vlm_processor = AutoProcessor.from_pretrained(
-            source,
-            min_pixels=256 * 28 * 28,
-            max_pixels=1024 * 28 * 28,
-        )
+        self.vlm_processor = AutoProcessor.from_pretrained(source)
 
         model_cls = None
         if "Qwen2.5-VL" in source or "Qwen2_5_VL" in source:

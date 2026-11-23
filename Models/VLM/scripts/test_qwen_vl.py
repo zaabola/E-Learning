@@ -65,20 +65,34 @@ def _load_grader_with_kaggle_fallback(ckpt_path: str, device):
 
     @torch.no_grad()
     def _hf_grade_fn(model, tokenizer, reference_answer, student_answer, question="", device=None):
-        enc = tokenizer(
+        # Bidirectional NLI entailment + non-contradiction calibration for off-the-shelf NLI fallback
+        enc_fwd = tokenizer(
             reference_answer,
             student_answer,
             truncation=True,
             max_length=256,
             return_tensors="pt",
         ).to(device)
-        logits = model(**enc).logits[0]
-        probs = torch.softmax(logits, dim=-1).cpu().tolist()
-        # cross-encoder/nli-deberta-v3-small label mapping: 0=contradiction, 1=entailment, 2=neutral
+        enc_rev = tokenizer(
+            student_answer,
+            reference_answer,
+            truncation=True,
+            max_length=256,
+            return_tensors="pt",
+        ).to(device)
+        probs_fwd = torch.softmax(model(**enc_fwd).logits[0], dim=-1).cpu().tolist()
+        probs_rev = torch.softmax(model(**enc_rev).logits[0], dim=-1).cpu().tolist()
+
         id2label = {int(k): str(v).lower() for k, v in model.config.id2label.items()}
+        con_idx = next((k for k, v in id2label.items() if "contradict" in v), 0)
         ent_idx = next((k for k, v in id2label.items() if "entail" in v), 1)
         neu_idx = next((k for k, v in id2label.items() if "neutral" in v), 2)
-        score = float(probs[ent_idx] + 0.35 * probs[neu_idx])
+
+        p_con = max(probs_fwd[con_idx], probs_rev[con_idx])
+        p_ent = 0.5 * (probs_fwd[ent_idx] + probs_rev[ent_idx])
+        p_neu = 0.5 * (probs_fwd[neu_idx] + probs_rev[neu_idx])
+
+        score = float((1.0 - p_con) * (p_ent + 0.88 * p_neu))
         verdict = "correct" if score >= 0.65 else ("partial" if score >= 0.40 else "incorrect")
         return {
             "verdict": verdict,

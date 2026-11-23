@@ -511,7 +511,7 @@ const AITutor = (() => {
   }
 
   async function submitVisionVQA(conceptId, studentAnswer, responseSec = 10.0) {
-    if (online) {
+    try {
       const data = await apiFetch('/api/vision/vqa', {
         method: 'POST',
         body: JSON.stringify({
@@ -519,19 +519,21 @@ const AITutor = (() => {
           student_answer: String(studentAnswer || ''),
           response_sec: Number(responseSec || 10.0),
         }),
-      }, 10000);
+      }, 15000);
+      online = true;
       statusCache = data.status;
       persistToPlayer(data.status);
       return data.result;
+    } catch (e) {
+      return {
+        concept_id: Number(conceptId || 0),
+        verdict: studentAnswer && studentAnswer.trim().length > 18 ? 'correct' : 'partial',
+        score: studentAnswer && studentAnswer.trim().length > 18 ? 0.88 : 0.48,
+        grader_latency_ms: 1.0,
+        mastery_before: localMastery.slice(),
+        mastery_after: localMastery.slice(),
+      };
     }
-    return {
-      concept_id: Number(conceptId || 0),
-      verdict: studentAnswer && studentAnswer.trim().length > 18 ? 'correct' : 'partial',
-      score: studentAnswer && studentAnswer.trim().length > 18 ? 0.88 : 0.48,
-      grader_latency_ms: 1.0,
-      mastery_before: localMastery.slice(),
-      mastery_after: localMastery.slice(),
-    };
   }
 
   function resolveBattleFocus(ctx = {}) {
@@ -868,18 +870,16 @@ const AITutor = (() => {
   let visionPuzzlesCache = null;
 
   async function getVisionPuzzles() {
+    try {
+      const res = await apiFetch('/api/vision/puzzles', { method: 'GET' }, 5000);
+      if (res && Array.isArray(res.puzzles) && res.puzzles.length) {
+        online = true;
+        visionPuzzlesCache = res.puzzles;
+        return visionPuzzlesCache;
+      }
+    } catch (e) { /* fall back */ }
     if (visionPuzzlesCache && visionPuzzlesCache.length) return visionPuzzlesCache;
-    if (online) {
-      try {
-        const res = await apiFetch('/api/vision/puzzles', { method: 'GET' }, 3000);
-        if (res && Array.isArray(res.puzzles) && res.puzzles.length) {
-          visionPuzzlesCache = res.puzzles;
-          return visionPuzzlesCache;
-        }
-      } catch (e) { /* fall back */ }
-    }
-    visionPuzzlesCache = FALLBACK_VISION_PUZZLES;
-    return visionPuzzlesCache;
+    return FALLBACK_VISION_PUZZLES;
   }
 
   function boxIoU(a, b) {

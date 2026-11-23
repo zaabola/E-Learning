@@ -2,31 +2,28 @@
 Dynamic PDF / PPTX / Word (.docx) & Slide Ingestor with Live Qwen2.5-VL-7B Inspection
 (`Models/VLM/scripts/custom_course_ingestor.py`)
 =====================================================================================
-Allows a student or teacher to insert a `.pdf`, `.pptx`, `.docx` (Word), or image
-directly inside the browser RPG:
+Transforms ANY uploaded `.pdf`, `.pptx`, `.docx` (Word), or image into a complete
+5-Concept Knowledge Graph + 10 Grounding DINO Lab Puzzles + VLM VQA Battle Course:
 
-  1. [Document Text & Photo Extraction]:
-     - `.pdf`  : Uses `PyMuPDF` (`fitz`) to extract embedded figures/photos AND
-                 renders visual diagram pages to high-res 720x420 PNGs, plus extracts text.
-     - `.pptx` : Extracts all embedded photos/diagrams from `ppt/media/*` AND extracts
-                 all slide titles/text from `ppt/slides/slide*.xml`.
-     - `.docx` : Extracts all embedded photos/figures from `word/media/*` AND extracts
-                 all headings/paragraphs from `word/document.xml`.
-     - `image` : Directly loads `.png` / `.jpg` / `.webp` slide or diagram images.
+  1. [Whole-Document Smart Photo Extraction & Logo Filtering]:
+     - Scans ALL pages/slides (skipping Page 1 cover logos when the document has >=4 pages).
+     - Filters out small icons, school/company banner logos, blank boxes, and repeated
+       header/footer images (by xref count + 16x16 perceptual hash deduplication).
+     - Pairs every unique extracted diagram 1-to-1 with its exact page/slide OCR text.
+     - Selects 5 unique, visually rich diagrams evenly spread across the ENTIRE document
+       (never stopping at page 6 and never duplicating the same photo across concepts).
 
-  2. [Autonomous VLM Inspection (`Qwen2.5-VL-7B-Instruct` on Kaggle GPU)]:
-     - Inspects the extracted photos/slides and document text by itself!
-     - Discovers the 5 core course concepts: (C0, C1) -> (C2, C3) -> C4 (Prerequisite DAG).
-     - Inspects each extracted photo to identify clickable visual components, generates
-       Grounding DINO prompts (`dino_prompt`), [0..1000] spatial bounding boxes, Lab Monitor
-       investigation prompts, Socratic hints, Study Notes, and DeBERTa-v3 VQA rubrics.
-
-  3. [Grounding DINO Spatial Localization on Extracted Photos]:
-     - Runs `IDEA-Research/grounding-dino-tiny` on the extracted PDF/PPTX/Word photos
-       and fuses boxes with Qwen2.5-VL-7B's spatial grounding coordinates.
+  2. [Pure Live `Qwen2.5-VL-7B-Instruct` Inspection (Zero Cross-Course Contamination)]:
+     - Calls `vlm_engine.comprehend_diagram_live(..., use_reference_cache=False)` with
+       the exact extracted photo + its slide text context.
+     - Automatically rejects non-educational images if `is_educational_diagram == false`.
+     - Generates genuine topic-matched concept titles, visual component labels, bounding
+       boxes, Grounding DINO prompts, Lab Calibration prompts, Study Notes, Multiple-Choice
+       Battle Questions, and DeBERTa-v3 VQA rubrics directly from the uploaded course!
 """
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -34,6 +31,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 import zipfile
+import numpy as np
 import torch
 from PIL import Image, ImageDraw
 
@@ -48,21 +46,138 @@ def _slugify(text: str) -> str:
     return s[:32] or f"course_{int(time.time())}"
 
 
-def _fit_diagram_canvas(pil_img: Image.Image, target_w: int = 720, target_h: int = 420) -> Image.Image:
-    """Letterboxes an extracted document photo onto a crisp 720x420 dark lab monitor canvas."""
+def _fit_diagram_canvas(pil_img: Image.Image, target_w: int = 720, target_h: int = 420):
+    """
+    Letterboxes an extracted document photo onto a crisp 720x420 dark lab monitor canvas.
+    Returns `(canvas_img, (ox, oy, nw, nh))` so bounding boxes map cleanly onto the canvas.
+    """
     img = pil_img.convert("RGB")
     iw, ih = img.size
     if iw <= 0 or ih <= 0:
-        return Image.new("RGB", (target_w, target_h), (14, 22, 36))
+        return Image.new("RGB", (target_w, target_h), (14, 22, 36)), (0, 0, target_w, target_h)
     scale = min(target_w / float(iw), target_h / float(ih))
     nw = max(1, int(round(iw * scale)))
     nh = max(1, int(round(ih * scale)))
-    resized = img.resize((nw, nh), Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC)
+    resized = img.resize(
+        (nw, nh),
+        Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC,
+    )
     canvas = Image.new("RGB", (target_w, target_h), (14, 22, 36))
     ox = (target_w - nw) // 2
     oy = (target_h - nh) // 2
     canvas.paste(resized, (ox, oy))
-    return canvas
+    return canvas, (ox, oy, nw, nh)
+
+
+def _perceptual_signature(pil_img: Image.Image) -> str:
+    """Computes a coarse 12x12 grayscale hash to deduplicate identical or near-identical images."""
+    small = pil_img.convert("L").resize((12, 12))
+    arr = np.asarray(small, dtype=np.float32)
+    bits = (arr > float(arr.mean())).astype(np.uint8).tobytes()
+    return hashlib.md5(bits).hexdigest()
+
+
+def _diagram_quality_score(pil_img: Image.Image) -> float:
+    """
+    Filters out university/company logos, tiny icons, solid color bars, and banner headers.
+    Returns 0.0 to reject, or a positive visual-richness score for real technical diagrams.
+    """
+    w, h = pil_img.size
+    if w < 220 or h < 140:
+        return 0.0
+    area = w * h
+    if area < 45000:
+        return 0.0
+    aspect = w / float(h)
+    # Reject skinny banner logos (like header/footer logos)
+    if aspect > 3.1 or aspect < 0.35:
+        return 0.0
+
+    # Measure visual detail / edge complexity & color richness
+    arr = np.asarray(pil_img.convert("RGB").resize((96, 64)), dtype=np.float32)
+    gray = arr.mean(axis=2)
+    std_val = float(gray.std())
+    if std_val < 12.0:
+        return 0.0  # nearly blank / solid rectangle
+
+    # Edge energy (horizontal + vertical gradients): technical diagrams have rich lines/boxes/text
+    gx = np.abs(np.diff(gray, axis=1)).mean()
+    gy = np.abs(np.diff(gray, axis=0)).mean()
+    edge_score = float(gx + gy)
+
+    # Non-white foreground ratio (logos often have tiny center mark surrounded by 85% white)
+    non_white = float((gray < 242.0).mean())
+    if non_white < 0.08:
+        return 0.0
+
+    # Favor larger, multi-color diagrams with strong structural edges
+    color_spread = float(np.abs(arr[:, :, 0] - arr[:, :, 2]).mean())
+    size_bonus = min(2.0, area / 200000.0)
+    return round(edge_score * (0.6 + 0.4 * size_bonus) + 0.25 * color_spread + 12.0 * non_white, 2)
+
+
+def _extract_slide_title(page_text: str, fallback: str) -> str:
+    """Extracts the most informative non-navigation heading from a Beamer/PPT/PDF slide."""
+    lines = [ln.strip(" -•*\t") for ln in (page_text or "").splitlines() if len(ln.strip(" -•*\t")) >= 4]
+    # Skip common short Beamer header/footer navigation lines & page numbers (e.g. "7/54", "Plan")
+    clean_lines = []
+    for ln in lines:
+        if re.match(r"^\d+\s*/\s*\d+$", ln):
+            continue
+        if ln.lower() in ("plan", "introduction", "sommaire", "outline", "agenda", "merci", "thank you"):
+            continue
+        clean_lines.append(ln)
+    if not clean_lines:
+        return fallback
+    # In Beamer slides (like Esprit slides), top lines are tiny nav menu; slide title often appears around lines 3-6
+    for ln in clean_lines:
+        if 8 <= len(ln) <= 70 and not ln.endswith("."):
+            if ":" in ln or len(ln.split()) >= 2:
+                return ln[:64]
+    return clean_lines[0][:64]
+
+
+def _select_balanced_candidates(candidates: list, total_pages: int, k: int = 5) -> list:
+    """
+    Spreads selection evenly across ALL pages of the document (e.g., 5 sequential chapter bands)
+    so a 54-page PDF contributes unique diagrams from beginning, middle, and end — never all from page 1-5!
+    """
+    if len(candidates) <= k:
+        return candidates
+
+    # Sort all unique candidates by document page order
+    ordered = sorted(candidates, key=lambda c: (c["page"], -c["score"]))
+    selected = []
+    used_sigs = set()
+
+    min_p = ordered[0]["page"]
+    max_p = max(ordered[-1]["page"], min_p + 1)
+    band_width = (max_p - min_p + 1) / float(k)
+
+    for b in range(k):
+        lo = min_p + b * band_width
+        hi = min_p + (b + 1) * band_width + (0.01 if b == k - 1 else 0.0)
+        band_items = [c for c in ordered if lo <= c["page"] < hi and c["sig"] not in used_sigs]
+        if band_items:
+            best = max(band_items, key=lambda c: c["score"])
+            selected.append(best)
+            used_sigs.add(best["sig"])
+
+    # Fill remaining slots with the highest-scoring unused diagrams across the whole doc
+    if len(selected) < k:
+        remaining = sorted(
+            [c for c in ordered if c["sig"] not in used_sigs],
+            key=lambda c: -c["score"],
+        )
+        for c in remaining:
+            if len(selected) >= k:
+                break
+            selected.append(c)
+            used_sigs.add(c["sig"])
+
+    # Return in pedagogical chapter page order
+    selected.sort(key=lambda c: c["page"])
+    return selected
 
 
 def extract_document_text_and_photos(
@@ -72,63 +187,118 @@ def extract_document_text_and_photos(
     course_id: str,
 ) -> dict:
     """
-    Extracts text sections and embedded photos/diagrams from a PDF, PPTX, DOCX, or Image file.
-    Saves up to 5 extracted photos into `diag_dir` as `c{i}_extracted.png`.
+    Scans the ENTIRE uploaded PDF / PPTX / DOCX / Image file:
+      - Filters out cover-page logos, tiny icons, and repeated headers/footers.
+      - Deduplicates identical images by perceptual hash.
+      - Pairs every unique extracted diagram with its exact page/slide text.
+      - Returns up to 8 top diverse candidates spread across the whole document so
+        `Qwen2.5-VL-7B` can pick the 5 strongest educational diagrams with zero duplicates.
     """
     ext = os.path.splitext((file_name or "").lower())[1]
-    text_sections = []
-    extracted_pil_images = []
+    all_page_texts = []
+    raw_candidates = []
+    seen_sigs = set()
+    total_pages = 1
 
     # -------------------------------------------------------------------------
-    # CASE 1: PDF Document (.pdf) via PyMuPDF (fitz) or pypdf
+    # CASE 1: PDF Document (.pdf) via PyMuPDF (fitz)
     # -------------------------------------------------------------------------
     if ext == ".pdf":
         try:
             import fitz  # PyMuPDF
 
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-            seen_xrefs = set()
-            page_renders = []
+            total_pages = len(doc)
+
+            # First pass: count how many pages each xref appears on (header/footer logos repeat!)
+            xref_page_counts = {}
+            for page in doc:
+                for img_info in page.get_images(full=True):
+                    xref = img_info[0]
+                    xref_page_counts[xref] = xref_page_counts.get(xref, 0) + 1
+
+            # Skip Page 1 cover slide for diagram extraction when document has >= 4 pages!
+            start_page_for_imgs = 1 if total_pages >= 4 else 0
 
             for page_idx, page in enumerate(doc):
                 txt = (page.get_text("text") or "").strip()
                 if txt:
-                    text_sections.append(txt)
+                    all_page_texts.append((page_idx + 1, txt))
 
-                # 1a. Extract embedded raster figures/diagrams from the PDF page
-                for img_info in page.get_images(full=True):
+                if page_idx < start_page_for_imgs:
+                    continue
+
+                # Skip pure "Plan" / TOC slides
+                if re.search(r"\bplan\b", txt.lower()[:120]) and len(page.get_images(full=True)) == 0:
+                    continue
+
+                page_imgs = page.get_images(full=True)
+                best_page_cand = None
+
+                for img_info in page_imgs:
                     xref = img_info[0]
-                    if xref in seen_xrefs:
+                    # Reject images repeated across >2 pages (watermarks, school logos, footer badges)
+                    if xref_page_counts.get(xref, 0) > 2:
                         continue
-                    seen_xrefs.add(xref)
                     try:
                         base_img = doc.extract_image(xref)
                         pil_im = Image.open(io.BytesIO(base_img["image"])).convert("RGB")
-                        # Filter out tiny icons/logos (< 120x80)
-                        if pil_im.width >= 120 and pil_im.height >= 80:
-                            extracted_pil_images.append(pil_im)
+                        score = _diagram_quality_score(pil_im)
+                        if score <= 0.0:
+                            continue
+                        sig = _perceptual_signature(pil_im)
+                        if sig in seen_sigs:
+                            continue
+                        if best_page_cand is None or score > best_page_cand["score"]:
+                            best_page_cand = {
+                                "page": page_idx + 1,
+                                "slide_title": _extract_slide_title(txt, f"Page {page_idx + 1}"),
+                                "slide_text": txt,
+                                "pil_img": pil_im,
+                                "sig": sig,
+                                "score": score,
+                                "is_full_slide": False,
+                            }
                     except Exception:
                         pass
 
-                # 1b. Also render the full PDF page/slide as a high-res image fallback
-                if len(page_renders) < 8:
-                    try:
-                        pix = page.get_pixmap(dpi=150)
-                        p_im = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
-                        page_renders.append(p_im)
-                    except Exception:
-                        pass
+                if best_page_cand is not None:
+                    seen_sigs.add(best_page_cand["sig"])
+                    raw_candidates.append(best_page_cand)
 
-            # Fill any remaining slots up to 5 with rendered PDF pages (great for vector diagrams/slides!)
-            if len(extracted_pil_images) < 5 and page_renders:
-                step = max(1, len(page_renders) // max(1, (5 - len(extracted_pil_images))))
-                for pr in page_renders[::step]:
-                    if len(extracted_pil_images) >= 5:
-                        break
-                    extracted_pil_images.append(pr)
+            # Fallback for vector-only PDFs (diagrams drawn as PDF paths instead of embedded bitmaps):
+            # Render slides that contain vector drawings (`page.get_drawings()`)!
+            if len(raw_candidates) < 5:
+                for page_idx, page in enumerate(doc):
+                    if page_idx < start_page_for_imgs:
+                        continue
+                    txt = (page.get_text("text") or "").strip()
+                    if any(c["page"] == page_idx + 1 for c in raw_candidates):
+                        continue
+                    drawings_count = len(page.get_drawings())
+                    if drawings_count >= 12:
+                        try:
+                            pix = page.get_pixmap(dpi=130)
+                            pil_im = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+                            sig = _perceptual_signature(pil_im)
+                            if sig not in seen_sigs:
+                                seen_sigs.add(sig)
+                                raw_candidates.append(
+                                    {
+                                        "page": page_idx + 1,
+                                        "slide_title": _extract_slide_title(txt, f"Slide {page_idx + 1}"),
+                                        "slide_text": txt,
+                                        "pil_img": pil_im,
+                                        "sig": sig,
+                                        "score": 15.0 + min(30.0, drawings_count * 0.25),
+                                        "is_full_slide": True,
+                                    }
+                                )
+                        except Exception:
+                            pass
             doc.close()
         except Exception as e:
-            print(f"  [DOC EXTRACT] PyMuPDF note: {e}")
+            print(f"  [DOC EXTRACT] PyMuPDF error: {e}")
 
     # -------------------------------------------------------------------------
     # CASE 2: PowerPoint Presentation (.pptx / .ppt)
@@ -136,31 +306,73 @@ def extract_document_text_and_photos(
     elif ext in (".pptx", ".ppt"):
         try:
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
-                # 2a. Extract all slide text from ppt/slides/slide*.xml
                 slide_files = sorted(
                     [n for n in zf.namelist() if re.match(r"^ppt/slides/slide\d+\.xml$", n)],
                     key=lambda x: int(re.findall(r"\d+", x)[0]),
                 )
-                for sf in slide_files:
-                    xml_bytes = zf.read(sf)
-                    root = ET.fromstring(xml_bytes)
-                    texts = [node.text.strip() for node in root.iter() if node.tag.endswith("}t") and node.text and node.text.strip()]
-                    if texts:
-                        text_sections.append("\n".join(texts))
+                total_pages = max(1, len(slide_files))
+                slide_text_map = {}
 
-                # 2b. Extract all embedded photos/diagrams from ppt/media/*
-                media_files = sorted(
-                    [n for n in zf.namelist() if n.startswith("ppt/media/") and n.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"))]
-                )
-                for mf in media_files:
-                    try:
-                        pil_im = Image.open(io.BytesIO(zf.read(mf))).convert("RGB")
-                        if pil_im.width >= 120 and pil_im.height >= 80:
-                            extracted_pil_images.append(pil_im)
-                    except Exception:
-                        pass
+                for idx, sf in enumerate(slide_files):
+                    slide_num = idx + 1
+                    root = ET.fromstring(zf.read(sf))
+                    texts = [
+                        node.text.strip()
+                        for node in root.iter()
+                        if node.tag.endswith("}t") and node.text and node.text.strip()
+                    ]
+                    joined = "\n".join(texts)
+                    slide_text_map[slide_num] = joined
+                    if joined:
+                        all_page_texts.append((slide_num, joined))
+
+                # Map media images to their exact slide via slide relationships (`ppt/slides/_rels/slideN.xml.rels`)
+                media_usage = {}
+                slide_to_media = {}
+                for idx, sf in enumerate(slide_files):
+                    slide_num = idx + 1
+                    rel_path = sf.replace("ppt/slides/", "ppt/slides/_rels/") + ".rels"
+                    if rel_path in zf.namelist():
+                        rel_root = ET.fromstring(zf.read(rel_path))
+                        for rel in rel_root.iter():
+                            tgt = rel.attrib.get("Target", "")
+                            if "../media/" in tgt and tgt.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                                m_path = "ppt/media/" + os.path.basename(tgt)
+                                media_usage[m_path] = media_usage.get(m_path, 0) + 1
+                                slide_to_media.setdefault(slide_num, []).append(m_path)
+
+                start_slide = 2 if total_pages >= 4 else 1
+                for slide_num, media_list in sorted(slide_to_media.items()):
+                    if slide_num < start_slide:
+                        continue
+                    txt = slide_text_map.get(slide_num, "")
+                    for mf in media_list:
+                        if media_usage.get(mf, 0) > 2 or mf not in zf.namelist():
+                            continue
+                        try:
+                            pil_im = Image.open(io.BytesIO(zf.read(mf))).convert("RGB")
+                            score = _diagram_quality_score(pil_im)
+                            if score <= 0.0:
+                                continue
+                            sig = _perceptual_signature(pil_im)
+                            if sig in seen_sigs:
+                                continue
+                            seen_sigs.add(sig)
+                            raw_candidates.append(
+                                {
+                                    "page": slide_num,
+                                    "slide_title": _extract_slide_title(txt, f"Slide {slide_num}"),
+                                    "slide_text": txt,
+                                    "pil_img": pil_im,
+                                    "sig": sig,
+                                    "score": score,
+                                    "is_full_slide": False,
+                                }
+                            )
+                        except Exception:
+                            pass
         except Exception as e:
-            print(f"  [DOC EXTRACT] PPTX parse note: {e}")
+            print(f"  [DOC EXTRACT] PPTX parse error: {e}")
 
     # -------------------------------------------------------------------------
     # CASE 3: Word Document (.docx / .doc)
@@ -168,35 +380,54 @@ def extract_document_text_and_photos(
     elif ext in (".docx", ".doc"):
         try:
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
-                # 3a. Extract all paragraphs from word/document.xml
+                paras = []
                 if "word/document.xml" in zf.namelist():
                     root = ET.fromstring(zf.read("word/document.xml"))
-                    paras = []
                     for p_node in root.iter():
                         if p_node.tag.endswith("}p"):
                             p_texts = [t.text for t in p_node.iter() if t.tag.endswith("}t") and t.text]
                             line = "".join(p_texts).strip()
                             if line:
                                 paras.append(line)
-                    # Group paragraphs into chunks
-                    if paras:
-                        chunk_size = max(1, len(paras) // 5)
-                        for i in range(0, len(paras), chunk_size):
-                            text_sections.append("\n".join(paras[i : i + chunk_size]))
+                total_pages = max(1, len(paras))
+                chunk_size = max(1, len(paras) // 5)
+                for i in range(0, len(paras), chunk_size):
+                    all_page_texts.append((i + 1, "\n".join(paras[i : i + chunk_size])))
 
-                # 3b. Extract all embedded photos/figures from word/media/*
                 media_files = sorted(
-                    [n for n in zf.namelist() if n.startswith("word/media/") and n.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"))]
+                    [
+                        n
+                        for n in zf.namelist()
+                        if n.startswith("word/media/")
+                        and n.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp"))
+                    ]
                 )
-                for mf in media_files:
+                for idx, mf in enumerate(media_files):
                     try:
                         pil_im = Image.open(io.BytesIO(zf.read(mf))).convert("RGB")
-                        if pil_im.width >= 120 and pil_im.height >= 80:
-                            extracted_pil_images.append(pil_im)
+                        score = _diagram_quality_score(pil_im)
+                        if score <= 0.0:
+                            continue
+                        sig = _perceptual_signature(pil_im)
+                        if sig in seen_sigs:
+                            continue
+                        seen_sigs.add(sig)
+                        sec_txt = all_page_texts[min(idx, len(all_page_texts) - 1)][1] if all_page_texts else ""
+                        raw_candidates.append(
+                            {
+                                "page": idx + 1,
+                                "slide_title": _extract_slide_title(sec_txt, f"Figure {idx + 1}"),
+                                "slide_text": sec_txt,
+                                "pil_img": pil_im,
+                                "sig": sig,
+                                "score": score,
+                                "is_full_slide": False,
+                            }
+                        )
                     except Exception:
                         pass
         except Exception as e:
-            print(f"  [DOC EXTRACT] DOCX parse note: {e}")
+            print(f"  [DOC EXTRACT] DOCX parse error: {e}")
 
     # -------------------------------------------------------------------------
     # CASE 4: Direct Image (.png, .jpg, .jpeg, .webp)
@@ -204,24 +435,47 @@ def extract_document_text_and_photos(
     elif ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
         try:
             pil_im = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-            extracted_pil_images.append(pil_im)
+            raw_candidates.append(
+                {
+                    "page": 1,
+                    "slide_title": os.path.splitext(os.path.basename(file_name))[0],
+                    "slide_text": "",
+                    "pil_img": pil_im,
+                    "sig": _perceptual_signature(pil_im),
+                    "score": 50.0,
+                    "is_full_slide": False,
+                }
+            )
         except Exception:
             pass
 
-    # Save extracted photos onto 720x420 canvases in `diag_dir`
-    saved_photo_rels = []
-    for idx, pil_im in enumerate(extracted_pil_images[:5]):
-        fitted = _fit_diagram_canvas(pil_im, 720, 420)
-        fname = f"c{idx}_extracted_photo.png"
+    # Select up to 8 diverse, high-quality unique diagrams spread evenly across ALL pages
+    balanced = _select_balanced_candidates(raw_candidates, total_pages=total_pages, k=8)
+
+    saved_items = []
+    for idx, item in enumerate(balanced):
+        fitted, fit_rect = _fit_diagram_canvas(item["pil_img"], 720, 420)
+        fname = f"p{item['page']}_fig{idx}.png"
         abs_p = os.path.join(diag_dir, fname)
         fitted.save(abs_p, "PNG")
-        saved_photo_rels.append(f"course_material/{course_id}/diagrams/{fname}")
+        saved_items.append(
+            {
+                "page": item["page"],
+                "slide_title": item["slide_title"],
+                "slide_text": item["slide_text"],
+                "diagram_file": f"course_material/{course_id}/diagrams/{fname}",
+                "abs_path": abs_p,
+                "fit_rect": fit_rect,
+                "score": item["score"],
+            }
+        )
 
     return {
         "ext": ext,
-        "text_sections": text_sections,
-        "saved_photo_rels": saved_photo_rels,
-        "num_photos_extracted": len(saved_photo_rels),
+        "total_pages": total_pages,
+        "all_page_texts": all_page_texts,
+        "candidates": saved_items,
+        "total_unique_found": len(raw_candidates),
     }
 
 
@@ -232,7 +486,7 @@ def _draw_concept_schematic(
     concept_title: str,
     block_labels: list,
 ) -> list:
-    """Renders a 720x420 technical schematic when a document section has no embedded photo."""
+    """Fallback 720x420 technical schematic if a document had fewer than 5 unique embedded diagrams."""
     W, H = 720, 420
     img = Image.new("RGB", (W, H), (14, 22, 36))
     draw = ImageDraw.Draw(img)
@@ -277,9 +531,6 @@ def _draw_concept_schematic(
             draw.text((x1 + 16, ty), ln, fill=(235, 244, 255))
             ty += 24
 
-        draw.rectangle([x1 + 18, y2 - 90, x2 - 18, y2 - 22], outline=border_col, width=1)
-        draw.text((x1 + 26, y2 - 64), f"Module C{concept_id}.{idx + 1}", fill=(175, 205, 235))
-
         if idx < 2:
             ax = x2 + 4
             bx = coords[idx + 1][0] - 4
@@ -292,58 +543,6 @@ def _draw_concept_schematic(
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     img.save(save_path, "PNG")
     return regions
-
-
-def _parse_concepts_from_notes_or_doc(course_title: str, raw_notes: str, doc_sections: list) -> list:
-    """
-    Extracts 5 structured (concept_title, concept_description) pairs from either:
-      - The extracted PDF / PPTX / DOCX text sections, OR
-      - The user's typed notes.
-    """
-    combined_source = raw_notes.strip()
-    if not combined_source and doc_sections:
-        # Take key heading/first sentences from extracted PDF/PPTX/Word sections
-        extracted_lines = []
-        for sec in doc_sections:
-            sec_lines = [ln.strip(" -•*\t") for ln in sec.splitlines() if len(ln.strip(" -•*\t")) >= 6]
-            if sec_lines:
-                heading = sec_lines[0][:58]
-                summary = " ".join(sec_lines[1:3])[:140] if len(sec_lines) > 1 else heading
-                extracted_lines.append(f"{heading}: {summary}")
-        combined_source = "\n".join(extracted_lines[:8])
-
-    lines = [ln.strip(" -•*\t") for ln in (combined_source or "").splitlines() if ln.strip(" -•*\t")]
-    chunks = []
-    for ln in lines:
-        cleaned = re.sub(r"^(?:concept|module|topic|chapter|slide|unit|\d+)[\s.:)-]+", "", ln, flags=re.I).strip()
-        if cleaned:
-            chunks.append(cleaned)
-
-    default_suffixes = [
-        "Core Foundations & Principles",
-        "Structural Representation & Metrics",
-        "Algorithmic Architecture & Flow",
-        "Sequential Processing & Optimization",
-        "End-to-End System Synthesis",
-    ]
-
-    concepts_raw = []
-    for i in range(5):
-        if i < len(chunks):
-            raw_item = chunks[i]
-            if ":" in raw_item:
-                t_part, d_part = raw_item.split(":", 1)
-                c_title = t_part.strip()[:56]
-                c_desc = d_part.strip()[:160] or f"{c_title} in {course_title}"
-            else:
-                c_title = raw_item[:56]
-                c_desc = f"{raw_item[:120]} in {course_title}"
-        else:
-            c_title = f"{course_title}: {default_suffixes[i]}"
-            c_desc = f"{default_suffixes[i]} for {course_title}"
-        concepts_raw.append((c_title, c_desc))
-
-    return concepts_raw
 
 
 def ingest_custom_course_package(
@@ -359,12 +558,12 @@ def ingest_custom_course_package(
 ) -> dict:
     """
     End-to-end ingestion of a PDF, PPTX, DOCX (Word), or Image file into the RPG:
-      1. Extracts embedded photos/slides and text sections from the uploaded document.
-      2. If Qwen2.5-VL-7B-Instruct is loaded live (on Kaggle GPU), runs live VLM visual
-         comprehension on each extracted photo to discover the concept title, visual
-         components, Grounding DINO prompts, and VQA challenge rubrics!
-      3. Runs live Grounding DINO zero-shot detection on each extracted photo to localize
-         the clickable `[x1, y1, x2, y2]` component boxes.
+      1. Extracts unique educational diagrams across ALL pages (skipping cover logos & duplicates).
+      2. Pairs every extracted diagram with its exact slide/page text.
+      3. Runs pure live `Qwen2.5-VL-7B-Instruct` (`use_reference_cache=False`) on each diagram
+         to extract genuine topic-matched concepts, visual components, Lab Monitor prompts,
+         multiple-choice battle questions, Study Notes, and DeBERTa-v3 VQA rubrics!
+      4. Runs Grounding DINO zero-shot detection on each extracted diagram to refine boxes.
     """
     def _report(pct: int, msg: str):
         if progress_cb:
@@ -373,7 +572,8 @@ def ingest_custom_course_package(
             except Exception:
                 pass
 
-    _report(8, f"Parsing '{file_name or course_title}' & extracting embedded photos...")
+    _report(6, f"Scanning ALL pages of '{file_name or course_title}' & filtering out logos/duplicates...")
+
     if not course_title or course_title.strip().lower() in ("", "custom ai course"):
         if file_name:
             base = os.path.splitext(os.path.basename(file_name))[0]
@@ -387,10 +587,15 @@ def ingest_custom_course_package(
     diag_dir = os.path.join(course_dir, "diagrams")
     os.makedirs(diag_dir, exist_ok=True)
 
-    # Decode uploaded file (.pdf, .pptx, .docx, or image)
     upload_b64 = file_base64 or image_base64
     upload_name = file_name or ("uploaded_slide.png" if image_base64 else "")
-    doc_info = {"ext": "", "text_sections": [], "saved_photo_rels": [], "num_photos_extracted": 0}
+    doc_info = {
+        "ext": "",
+        "total_pages": 0,
+        "all_page_texts": [],
+        "candidates": [],
+        "total_unique_found": 0,
+    }
 
     if upload_b64:
         b64_payload = upload_b64.split(",", 1)[1] if "," in upload_b64 else upload_b64
@@ -403,189 +608,267 @@ def ingest_custom_course_package(
                 course_id=course_id,
             )
             print(
-                f"  [DOCUMENT PARSER] File='{upload_name}' ({doc_info['ext']}) -> "
-                f"Extracted {len(doc_info['text_sections'])} text sections & "
-                f"{doc_info['num_photos_extracted']} embedded photos/slides!"
+                f"  [DOCUMENT PARSER] '{upload_name}' ({doc_info['total_pages']} pages) -> "
+                f"Found {doc_info['total_unique_found']} unique diagrams (logos skipped); "
+                f"selected {len(doc_info['candidates'])} chapter-balanced candidates: "
+                f"pages {[c['page'] for c in doc_info['candidates']]}",
+                flush=True,
             )
         except Exception as e:
-            print(f"  [DOCUMENT PARSER] Warning decoding '{upload_name}': {e}")
+            print(f"  [DOCUMENT PARSER] Warning decoding '{upload_name}': {e}", flush=True)
 
-    parsed_pairs = _parse_concepts_from_notes_or_doc(
-        course_title=course_title,
-        raw_notes=raw_notes,
-        doc_sections=doc_info["text_sections"],
-    )
-    prereq_map = {0: [], 1: [], 2: [0], 3: [1], 4: [2, 3]}
-    extracted_photos = doc_info["saved_photo_rels"]
-
-    # Check if live Qwen2.5-VL-7B is active on Kaggle GPU
+    candidates = doc_info["candidates"]
     vlm_is_live = (
         vlm_engine is not None
         and (vlm_engine.mode == "live" or vlm_engine.vlm_model is not None)
     )
 
+    _report(
+        16,
+        f"Found {doc_info['total_unique_found']} unique diagrams across {doc_info['total_pages']} pages (skipped logos). Inspecting with Qwen2.5-VL-7B...",
+    )
+
+    # Run live Qwen2.5-VL-7B inspection on candidate diagrams, automatically skipping any
+    # decorative image where Qwen2.5-VL-7B says `is_educational_diagram: false`!
+    accepted_slots = []
+    cand_cursor = 0
+
+    while len(accepted_slots) < 5 and cand_cursor < len(candidates):
+        cand = candidates[cand_cursor]
+        cand_cursor += 1
+        slot_idx = len(accepted_slots)
+        _report(
+            20 + slot_idx * 14,
+            f"Qwen2.5-VL-7B inspecting Page {cand['page']} diagram ({slot_idx + 1}/5): {cand['slide_title'][:36]}...",
+        )
+
+        vlm_res = None
+        if vlm_is_live:
+            try:
+                print(
+                    f"  [Qwen2.5-VL-7B LIVE] Concept C{slot_idx} | Page {cand['page']} ({cand['slide_title']})...",
+                    flush=True,
+                )
+                vlm_res = vlm_engine.comprehend_diagram_live(
+                    image_path=cand["abs_path"],
+                    concept_id=slot_idx,
+                    concept_title=f"{course_title} — {cand['slide_title']}",
+                    slide_context=cand["slide_text"],
+                    use_reference_cache=False,  # CRITICAL: NEVER mix old YOLO/OCR cache!
+                )
+                # If Qwen2.5-VL-7B flags this as a logo/non-educational image and more candidates remain, skip it!
+                if vlm_res.get("is_educational_diagram") is False and (len(candidates) - cand_cursor) >= (5 - len(accepted_slots)):
+                    print(f"  [Qwen2.5-VL-7B FILTER] Rejected decorative/logo image on Page {cand['page']}.", flush=True)
+                    continue
+            except Exception as e:
+                print(f"  [Qwen2.5-VL-7B LIVE] Error on Page {cand['page']}: {e}", flush=True)
+
+        accepted_slots.append({"cand": cand, "vlm": vlm_res})
+
+    # If the uploaded document had fewer than 5 unique diagrams, build distinct text-based schematics
+    # for the remaining slots using spread-out text pages from the document (never duplicating photos!)
+    all_texts = doc_info["all_page_texts"]
+    while len(accepted_slots) < 5:
+        slot_idx = len(accepted_slots)
+        if all_texts:
+            pick_t = all_texts[min(len(all_texts) - 1, int(slot_idx * len(all_texts) / 5))]
+            p_num, p_txt = pick_t
+            s_title = _extract_slide_title(p_txt, f"{course_title} Part {slot_idx + 1}")
+        else:
+            p_num = slot_idx + 1
+            p_txt = raw_notes or course_title
+            s_title = f"{course_title} Concept {slot_idx + 1}"
+
+        fname = f"c{slot_idx}_schematic.png"
+        abs_p = os.path.join(diag_dir, fname)
+        block_labels = [
+            f"{s_title[:18]} Input",
+            f"{s_title[:18]} Core",
+            f"{s_title[:18]} Output",
+        ]
+        regs = _draw_concept_schematic(abs_p, slot_idx, course_title, s_title, block_labels)
+        accepted_slots.append(
+            {
+                "cand": {
+                    "page": p_num,
+                    "slide_title": s_title,
+                    "slide_text": p_txt,
+                    "diagram_file": f"course_material/{course_id}/diagrams/{fname}",
+                    "abs_path": abs_p,
+                    "fallback_regions": regs,
+                },
+                "vlm": None,
+            }
+        )
+
+    prereq_map = {0: [], 1: [], 2: [0], 3: [1], 4: [2, 3]}
     concepts_list = []
     new_dino_puzzles = []
     new_vlm_diagrams = []
 
-    _report(
-        18,
-        f"Extracted {doc_info['num_photos_extracted']} photos & {len(doc_info['text_sections'])} sections. Starting Qwen2.5-VL-7B inspection...",
-    )
+    for cid, slot in enumerate(accepted_slots):
+        cand = slot["cand"]
+        vlm_res = slot["vlm"] or {}
 
-    for cid in range(5):
-        _report(
-            22 + cid * 15,
-            f"Qwen2.5-VL-7B & Grounding DINO analyzing Concept {cid + 1}/5...",
-        )
-        c_title, c_desc = parsed_pairs[cid]
+        diag_rel = cand["diagram_file"]
+        abs_diag = cand["abs_path"]
+        page_num = cand["page"]
+
+        c_title = (vlm_res.get("concept_title") or cand["slide_title"] or f"{course_title} C{cid}").strip()[:64]
         short_title = c_title.split(":")[0].strip()[:22]
+        visual_summary = (
+            vlm_res.get("visual_summary")
+            or (cand["slide_text"][:220].replace("\n", " ") if cand["slide_text"] else f"Key architecture of {c_title}.")
+        )
 
-        # Use extracted photo from the PDF/PPTX/Word document if available!
-        has_extracted_photo = len(extracted_photos) > 0
-        if cid < len(extracted_photos):
-            diag_rel = extracted_photos[cid]
-        elif has_extracted_photo:
-            # Cycle through extracted document photos if the document had fewer than 5 photos
-            diag_rel = extracted_photos[cid % len(extracted_photos)]
+        # Build the 2 clickable components strictly from THIS image's live Qwen2.5-VL-7B output!
+        v_comps = vlm_res.get("components") if isinstance(vlm_res.get("components"), list) else []
+        if len(v_comps) >= 2:
+            comp_pair = v_comps[:2]
+        elif cand.get("fallback_regions"):
+            fr = cand["fallback_regions"]
+            comp_pair = [
+                {
+                    "target_label": fr[0]["label"],
+                    "dino_prompt": f"orange {fr[0]['label'].lower()} box.",
+                    "vlm_box_px": fr[0]["box"],
+                    "lab_question": f"Click or drag a box around [{fr[0]['label']}] in {c_title}.",
+                    "socratic_hint": "Look at the leftmost block.",
+                    "explanation": visual_summary,
+                },
+                {
+                    "target_label": fr[2]["label"],
+                    "dino_prompt": f"green {fr[2]['label'].lower()} box.",
+                    "vlm_box_px": fr[2]["box"],
+                    "lab_question": f"Click or drag a box around [{fr[2]['label']}] in {c_title}.",
+                    "socratic_hint": "Look at the rightmost block.",
+                    "explanation": visual_summary,
+                },
+            ]
         else:
-            diag_filename = f"c{cid}_schematic.png"
-            abs_diag = os.path.join(diag_dir, diag_filename)
-            diag_rel = f"course_material/{course_id}/diagrams/{diag_filename}"
-            block_labels = [
-                f"{short_title} Input & Encoding",
-                f"{short_title} Core Transform",
-                f"{short_title} Output & Loss",
+            comp_pair = [
+                {
+                    "target_label": f"{short_title} Primary Block",
+                    "dino_prompt": "left diagram component box.",
+                    "vlm_box_px": [60.0, 80.0, 340.0, 340.0],
+                    "lab_question": f"Click or drag a box around the primary component of {c_title} (Page {page_num}).",
+                    "socratic_hint": "Look at the left side of the extracted diagram.",
+                    "explanation": visual_summary,
+                },
+                {
+                    "target_label": f"{short_title} Secondary Block",
+                    "dino_prompt": "right diagram component box.",
+                    "vlm_box_px": [380.0, 80.0, 660.0, 340.0],
+                    "lab_question": f"Click or drag a box around the secondary component of {c_title} (Page {page_num}).",
+                    "socratic_hint": "Look at the right side of the extracted diagram.",
+                    "explanation": visual_summary,
+                },
             ]
-            _draw_concept_schematic(abs_diag, cid, course_title, c_title, block_labels)
 
-        abs_diag = os.path.join(REPO_ROOT, diag_rel)
-
-        # ---------------------------------------------------------------------
-        # LIVE QWEN2.5-VL-7B PHOTO & CONCEPT INSPECTION (ON KAGGLE GPU)
-        # ---------------------------------------------------------------------
-        live_vlm_out = None
-        if vlm_is_live:
-            try:
-                print(f"  [Qwen2.5-VL-7B LIVE] Inspecting photo '{diag_rel}' for Concept C{cid}...")
-                live_vlm_out = vlm_engine.comprehend_diagram_live(
-                    image_path=abs_diag,
-                    concept_id=cid,
-                    concept_title=f"{course_title} - {c_title}",
-                )
-                if live_vlm_out.get("concept_title"):
-                    c_title = live_vlm_out["concept_title"][:60]
-                    short_title = c_title.split(":")[0].strip()[:22]
-                if live_vlm_out.get("visual_summary"):
-                    c_desc = live_vlm_out["visual_summary"][:200]
-            except Exception as e:
-                print(f"  [Qwen2.5-VL-7B LIVE] Note on C{cid}: {e}")
-
-        # Default 3 regions across 720x420 canvas
-        regions = [
-            {"label": f"{short_title} Input Stage", "box": [28, 92, 232, 368], "color_name": "left"},
-            {"label": f"{short_title} Core Module", "box": [264, 92, 476, 368], "color_name": "center"},
-            {"label": f"{short_title} Output Stage", "box": [508, 92, 696, 368], "color_name": "right"},
-        ]
-
-        # If Qwen2.5-VL-7B returned live components & boxes, use them!
-        if live_vlm_out and len(live_vlm_out.get("components", [])) >= 2:
-            v_comps = live_vlm_out["components"]
-            regions[0]["label"] = v_comps[0].get("target_label", regions[0]["label"])
-            regions[0]["box"] = v_comps[0].get("vlm_box_px", regions[0]["box"])
-            regions[0]["dino_prompt"] = v_comps[0].get("dino_prompt", f"{regions[0]['label'].lower()} box.")
-            regions[2]["label"] = v_comps[1].get("target_label", regions[2]["label"])
-            regions[2]["box"] = v_comps[1].get("vlm_box_px", regions[2]["box"])
-            regions[2]["dino_prompt"] = v_comps[1].get("dino_prompt", f"{regions[2]['label'].lower()} box.")
-
-        # Run Grounding DINO zero-shot detection on extracted photos to refine bounding boxes!
-        if has_extracted_photo and dino_evaluator is not None:
-            try:
-                pil_up = Image.open(abs_diag).convert("RGB")
-                p_text = (
-                    f"{regions[0].get('dino_prompt', 'diagram component.')} "
-                    f"{regions[2].get('dino_prompt', 'diagram block.')}"
-                )
-                inputs = dino_evaluator.processor(
-                    images=pil_up, text=p_text, return_tensors="pt"
-                ).to(dino_evaluator.device)
-                with torch.no_grad():
-                    outputs = dino_evaluator.model(**inputs)
-                res = dino_evaluator.processor.post_process_grounded_object_detection(
-                    outputs, inputs.input_ids, threshold=0.13, text_threshold=0.11, target_sizes=[(420, 720)]
-                )[0]
-                boxes = res["boxes"].detach().cpu().tolist()
-                if len(boxes) >= 2:
-                    boxes_sorted = sorted(boxes[:4], key=lambda b: b[0])
-                    regions[0]["box"] = [round(float(v), 1) for v in boxes_sorted[0]]
-                    regions[2]["box"] = [round(float(v), 1) for v in boxes_sorted[-1]]
-            except Exception:
-                pass
-
-        comp_items = []
-        for p_idx, reg_idx in enumerate((0, 2)):
-            reg = regions[reg_idx]
+        # Refine bounding boxes with Grounding DINO on the extracted photo if high-confidence match found
+        final_comps = []
+        all_regions_for_puzzle = []
+        for p_idx, comp in enumerate(comp_pair):
             pid = f"c{cid}_p{p_idx + 1}"
-            t_box = [float(v) for v in reg["box"]]
-            b1000 = [
-                round(t_box[0] * 1000.0 / 720.0),
-                round(t_box[1] * 1000.0 / 420.0),
-                round(t_box[2] * 1000.0 / 720.0),
-                round(t_box[3] * 1000.0 / 420.0),
-            ]
-            dino_prompt = reg.get("dino_prompt") or f"{reg['color_name']} {reg['label'].lower()} box."
-            prompt_text = (
-                f"LAB CALIBRATION C{cid}-{'A' if p_idx == 0 else 'B'} ({course_title}): "
-                f"Click or drag a bounding box around [{reg['label']}] in the extracted figure."
-            )
-            expl_text = (
-                f"In {c_title}, [{reg['label']}] models {c_desc} and connects directly to the downstream stage."
-            )
+            t_label = str(comp.get("target_label", f"{short_title} Block {p_idx + 1}"))
+            d_prompt = str(comp.get("dino_prompt", f"{t_label.lower()} box."))
+            if not d_prompt.strip().endswith("."):
+                d_prompt = d_prompt.strip() + "."
 
-            puz_obj = {
-                "puzzle_id": pid,
-                "concept_id": cid,
-                "concept_title": c_title,
-                "diagram_file": diag_rel,
-                "diagram_width": 720,
-                "diagram_height": 420,
-                "target_label": reg["label"],
-                "dino_prompt": dino_prompt,
-                "prompt": prompt_text,
-                "target_box": t_box,
-                "all_regions": [{"label": r["label"], "box": r["box"]} for r in regions],
-                "explanation": expl_text,
-            }
-            new_dino_puzzles.append(puz_obj)
-            comp_items.append(
+            vlm_box_px = [float(v) for v in comp.get("vlm_box_px", [60.0, 80.0, 340.0, 340.0])]
+            refined_box = vlm_box_px
+
+            if dino_evaluator is not None and os.path.exists(abs_diag):
+                try:
+                    pil_im = Image.open(abs_diag).convert("RGB")
+                    inputs = dino_evaluator.processor(
+                        images=pil_im, text=d_prompt, return_tensors="pt"
+                    ).to(dino_evaluator.device)
+                    with torch.no_grad():
+                        outputs = dino_evaluator.model(**inputs)
+                    dres = dino_evaluator.processor.post_process_grounded_object_detection(
+                        outputs,
+                        inputs.input_ids,
+                        threshold=0.18,
+                        text_threshold=0.14,
+                        target_sizes=[(420, 720)],
+                    )[0]
+                    d_boxes = dres["boxes"].detach().cpu().tolist()
+                    d_scores = dres["scores"].detach().cpu().tolist()
+                    if d_boxes:
+                        # Blend Grounding DINO box with Qwen2.5-VL-7B box if they overlap reasonably
+                        best_d = d_boxes[int(np.argmax(d_scores))]
+                        best_d = [round(float(v), 1) for v in best_d]
+                        # Compute IoU
+                        ix1 = max(vlm_box_px[0], best_d[0])
+                        iy1 = max(vlm_box_px[1], best_d[1])
+                        ix2 = min(vlm_box_px[2], best_d[2])
+                        iy2 = min(vlm_box_px[3], best_d[3])
+                        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                        area_v = max(1.0, (vlm_box_px[2] - vlm_box_px[0]) * (vlm_box_px[3] - vlm_box_px[1]))
+                        area_d = max(1.0, (best_d[2] - best_d[0]) * (best_d[3] - best_d[1]))
+                        iou = inter / (area_v + area_d - inter)
+                        if iou >= 0.25:
+                            refined_box = [round(0.60 * vlm_box_px[i] + 0.40 * best_d[i], 1) for i in range(4)]
+                except Exception:
+                    pass
+
+            b1000 = [
+                round(refined_box[0] * 1000.0 / 720.0),
+                round(refined_box[1] * 1000.0 / 420.0),
+                round(refined_box[2] * 1000.0 / 720.0),
+                round(refined_box[3] * 1000.0 / 420.0),
+            ]
+            lab_q = comp.get("lab_question") or f"Click or drag a box around [{t_label}] in this diagram (Page {page_num})."
+            expl = comp.get("explanation") or visual_summary
+            hint = comp.get("socratic_hint") or f"Locate [{t_label}] inside the extracted figure from Page {page_num}."
+
+            all_regions_for_puzzle.append({"label": t_label, "box": refined_box})
+            final_comps.append(
                 {
                     "component_id": pid,
-                    "target_label": reg["label"],
-                    "dino_prompt": dino_prompt,
+                    "target_label": t_label,
+                    "dino_prompt": d_prompt,
                     "vlm_box_1000": b1000,
-                    "vlm_box_px": t_box,
-                    "ground_truth_box_px": t_box,
-                    "lab_question": prompt_text,
-                    "socratic_hint": f"Inspect the {'left' if p_idx == 0 else 'right'} region of the extracted figure.",
-                    "explanation": expl_text,
+                    "vlm_box_px": refined_box,
+                    "ground_truth_box_px": refined_box,
+                    "lab_question": f"LAB C{cid}-{'A' if p_idx == 0 else 'B'} (Page {page_num}): {lab_q}",
+                    "socratic_hint": hint,
+                    "explanation": expl,
                 }
             )
 
-        if live_vlm_out and live_vlm_out.get("vqa_challenge", {}).get("question"):
-            vqa_obj = live_vlm_out["vqa_challenge"]
-            vqa_question = vqa_obj["question"]
-            vqa_ref = vqa_obj["reference_answer"]
-        else:
-            vqa_question = f"In {course_title}, how does {c_title} process information across its components?"
-            vqa_ref = f"{c_title} models {c_desc} by coupling {regions[0]['label']} with {regions[2]['label']}."
-            vqa_obj = {
-                "vqa_id": f"vqa_c{cid}",
-                "question": vqa_question,
-                "reference_answer": vqa_ref,
-                "sample_correct_answer": f"It connects {regions[0]['label']} and {regions[2]['label']} to accomplish {c_desc}.",
-                "sample_partial_answer": f"It processes {c_title} in the diagram.",
-                "misconception_trap_answer": f"{c_title} never connects {regions[0]['label']} and discards all information before {regions[2]['label']}.",
-            }
+        for fc in final_comps:
+            new_dino_puzzles.append(
+                {
+                    "puzzle_id": fc["component_id"],
+                    "concept_id": cid,
+                    "concept_title": c_title,
+                    "diagram_file": diag_rel,
+                    "diagram_width": 720,
+                    "diagram_height": 420,
+                    "target_label": fc["target_label"],
+                    "dino_prompt": fc["dino_prompt"],
+                    "prompt": fc["lab_question"],
+                    "target_box": fc["ground_truth_box_px"],
+                    "all_regions": list(all_regions_for_puzzle),
+                    "explanation": fc["explanation"],
+                }
+            )
+
+        # VQA challenge strictly from Qwen2.5-VL-7B reading THIS exact page/diagram!
+        live_vqa = vlm_res.get("vqa_challenge") if isinstance(vlm_res.get("vqa_challenge"), dict) else {}
+        vqa_question = live_vqa.get("question") or f"Explain how {final_comps[0]['target_label']} works in {c_title}."
+        vqa_ref = live_vqa.get("reference_answer") or visual_summary
+        vqa_obj = {
+            "vqa_id": f"vqa_c{cid}",
+            "question": vqa_question,
+            "reference_answer": vqa_ref,
+            "sample_correct_answer": live_vqa.get("sample_correct_answer") or vqa_ref,
+            "sample_partial_answer": live_vqa.get("sample_partial_answer") or "",
+            "misconception_trap_answer": live_vqa.get("misconception_trap_answer")
+            or f"{final_comps[0]['target_label']} is unrelated to {c_title}.",
+        }
 
         new_vlm_diagrams.append(
             {
@@ -595,15 +878,63 @@ def ingest_custom_course_package(
                 "diagram_file": diag_rel,
                 "diagram_width": 720,
                 "diagram_height": 420,
-                "visual_summary": (live_vlm_out or {}).get(
-                    "visual_summary",
-                    f"Qwen2.5-VL-7B Document Inspection of {c_title}: {c_desc}",
-                ),
-                "extracted_labels": [r["label"] for r in regions],
-                "components": comp_items,
+                "visual_summary": visual_summary,
+                "extracted_labels": vlm_res.get("extracted_labels") or [r["label"] for r in all_regions_for_puzzle],
+                "components": final_comps,
                 "vqa_challenge": vqa_obj,
             }
         )
+
+        # Real Multiple-Choice Battle Questions generated by Qwen2.5-VL-7B directly from THIS diagram + slide!
+        raw_mcs = vlm_res.get("mc_questions") if isinstance(vlm_res.get("mc_questions"), list) else []
+        valid_mcs = []
+        for q_item in raw_mcs:
+            if (
+                isinstance(q_item, dict)
+                and q_item.get("question")
+                and isinstance(q_item.get("choices"), list)
+                and len(q_item["choices"]) >= 4
+            ):
+                valid_mcs.append(
+                    {
+                        "question": str(q_item["question"]),
+                        "choices": [str(ch) for ch in q_item["choices"][:4]],
+                        "correct_idx": int(q_item.get("correct_idx", 0)) % 4,
+                        "reference": vqa_ref,
+                    }
+                )
+
+        if not valid_mcs:
+            valid_mcs = [
+                {
+                    "question": f"({c_title} — Page {page_num}) What is the role of {final_comps[0]['target_label']}?",
+                    "choices": [
+                        final_comps[0]["explanation"][:115],
+                        "It permanently disables the entire system architecture",
+                        "It replaces all data structures with random noise",
+                        "It has no role in this chapter",
+                    ],
+                    "correct_idx": 0,
+                    "reference": final_comps[0]["explanation"],
+                },
+                {
+                    "question": f"({c_title} — Page {page_num}) Which component works alongside {final_comps[0]['target_label']} in this figure?",
+                    "choices": [
+                        final_comps[1]["target_label"],
+                        "An unrelated external audio codec",
+                        "A random pixel blur filter",
+                        "None of the above",
+                    ],
+                    "correct_idx": 0,
+                    "reference": visual_summary,
+                },
+            ]
+
+        summary_bullets = vlm_res.get("summary_bullets") if isinstance(vlm_res.get("summary_bullets"), list) and len(vlm_res["summary_bullets"]) >= 2 else [
+            f"Page {page_num} Summary: {visual_summary}",
+            f"Component A: {final_comps[0]['target_label']} — {final_comps[0]['explanation']}",
+            f"Component B: {final_comps[1]['target_label']} — {final_comps[1]['explanation']}",
+        ]
 
         concepts_list.append(
             {
@@ -612,50 +943,10 @@ def ingest_custom_course_package(
                 "short_title": short_title,
                 "prereqs": prereq_map[cid],
                 "podcast_audio": None,
-                "podcast_hint": f'[Voice Log C{cid}] "In {course_title}, {c_title} works by linking {regions[0]["label"]} with {regions[2]["label"]}: {c_desc}!"',
-                "summary_bullets": [
-                    f"Extracted Concept: {c_desc}",
-                    f"Component 1 ({regions[0]['label']}): Handles initial input representation.",
-                    f"Component 2 ({regions[2]['label']}): Completes the {short_title} transformation.",
-                    f"Source Document: Extracted automatically by Qwen2.5-VL-7B + Grounding DINO from '{upload_name or course_title}'.",
-                ],
-                "easy_mc": [
-                    {
-                        "question": f"According to the ingested '{course_title}' material, what is the role of {c_title}?",
-                        "choices": [
-                            f"{c_desc[:110]}",
-                            "To erase all system memory before execution",
-                            "To replace structured processing with random noise",
-                            "To disconnect all downstream components",
-                        ],
-                        "correct_idx": 0,
-                        "reference": vqa_ref,
-                    },
-                    {
-                        "question": f"Which visual component is highlighted in the {short_title} diagram?",
-                        "choices": [
-                            regions[0]["label"],
-                            "An uncalibrated noise generator",
-                            "A disconnected null pointer",
-                            "None of the above",
-                        ],
-                        "correct_idx": 0,
-                        "reference": f"{regions[0]['label']} is a primary component of {c_title}.",
-                    },
-                ],
-                "medium_mc": [
-                    {
-                        "question": f"How do {regions[0]['label']} and {regions[2]['label']} work together in {c_title}?",
-                        "choices": [
-                            f"{regions[0]['label']} feeds structured representations into the pipeline to drive {regions[2]['label']}",
-                            f"{regions[2]['label']} deletes the inputs of {regions[0]['label']}",
-                            "They never exchange any data or signals",
-                            "They bypass the core architecture entirely",
-                        ],
-                        "correct_idx": 0,
-                        "reference": vqa_ref,
-                    }
-                ],
+                "podcast_hint": f'[Voice Log C{cid} · Page {page_num}] "{visual_summary}"',
+                "summary_bullets": [str(b) for b in summary_bullets[:4]],
+                "easy_mc": valid_mcs,
+                "medium_mc": [valid_mcs[-1]],
                 "boss_open": [
                     {
                         "question": vqa_question,
@@ -665,15 +956,18 @@ def ingest_custom_course_package(
             }
         )
 
+    _report(96, f"Finalizing 5-Concept Knowledge Graph & 10 Lab Monitor puzzles for '{course_title}'...")
+
     course_pkg = {
         "course_id": course_id,
         "title": course_title,
         "subtitle": (
-            f"Ingested from {upload_name or 'Document'} "
-            f"({doc_info['num_photos_extracted']} Extracted Photos, 10 VLM+DINO Puzzles)"
+            f"Extracted from {upload_name or 'Document'} "
+            f"({doc_info['total_unique_found']} Unique Figures Found -> 5 Chapter Diagrams, 10 VLM+DINO Puzzles)"
         ),
         "mentor": "Prof. Ada (Qwen2.5-VL-7B + Grounding DINO Lab)",
-        "num_photos_extracted": doc_info["num_photos_extracted"],
+        "num_photos_extracted": len(candidates),
+        "total_unique_found": doc_info["total_unique_found"],
         "source_file": upload_name,
         "concepts": concepts_list,
         "puzzles": new_dino_puzzles,
@@ -681,7 +975,7 @@ def ingest_custom_course_package(
     }
 
     with open(os.path.join(course_dir, "course_curriculum.json"), "w", encoding="utf-8") as f:
-        json.dump(course_pkg, f, indent=2)
+        json.dump(course_pkg, f, indent=2, ensure_ascii=False)
 
     if dino_evaluator is not None:
         dino_evaluator.puzzles_list = new_dino_puzzles

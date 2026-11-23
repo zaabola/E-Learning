@@ -49,29 +49,38 @@ VLM_DATA_JSON = os.path.join(VLM_ROOT, "data", "vlm_extracted_diagrams.json")
 VLM_CKPT_DIR = os.path.join(VLM_ROOT, "checkpoints", "qwen_vl_7b")
 
 VLM_SYSTEM_PROMPT = (
-    "You are an expert AI Engineering professor and Multimodal Curriculum Architect. "
-    "Analyze the provided technical course diagram and return ONLY a valid JSON object "
-    "with the following exact schema:\n"
+    "You are an expert University Professor and Multimodal Curriculum Architect. "
+    "Inspect ONLY the provided technical slide/diagram image and its slide text context. "
+    "Write questions and labels in the SAME language as the slide (French if the slide is in French, English if in English). "
+    "Return ONLY a valid JSON object with this exact schema:\n"
     "{\n"
-    '  "concept_title": "Academic title of the diagram",\n'
-    '  "visual_summary": "2-3 sentence rigorous technical explanation of the diagram flow",\n'
-    '  "extracted_labels": ["list", "of", "key", "diagram", "blocks"],\n'
+    '  "is_educational_diagram": true,\n'
+    '  "concept_title": "Short exact academic concept title from this diagram",\n'
+    '  "visual_summary": "2-sentence technical explanation of what this specific diagram shows",\n'
+    '  "extracted_labels": ["label 1 visible in image", "label 2 visible in image", "label 3"],\n'
+    '  "summary_bullets": ["Key fact 1 from diagram/slide", "Key fact 2", "Key fact 3"],\n'
     '  "components": [\n'
     "    {\n"
-    '      "component_id": "unique_id",\n'
-    '      "target_label": "Exact name of visual block",\n'
-    '      "dino_prompt": "short visual description for Grounding DINO ending with a period.",\n'
+    '      "target_label": "Exact named component visible in THIS image",\n'
+    '      "dino_prompt": "short visual description of this component box in English ending with a period.",\n'
     '      "vlm_box_1000": [x1_0_to_1000, y1_0_to_1000, x2_0_to_1000, y2_0_to_1000],\n'
-    '      "lab_question": "LAB CALIBRATION prompt asking the student to click/box this component",\n'
-    '      "socratic_hint": "1-sentence spatial/conceptual clue if the student misses",\n'
-    '      "explanation": "1-sentence pedagogical explanation of why this block matters"\n'
+    '      "lab_question": "Click or drag a box around [target_label] shown in this figure.",\n'
+    '      "socratic_hint": "1-sentence visual hint pointing to where it is on the figure",\n'
+    '      "explanation": "1-sentence explanation of what this component does"\n'
+    "    }\n"
+    "  ],\n"
+    '  "mc_questions": [\n'
+    "    {\n"
+    '      "question": "Specific multiple-choice question about THIS diagram/slide",\n'
+    '      "choices": ["Correct answer", "Plausible wrong option 1", "Plausible wrong option 2", "Plausible wrong option 3"],\n'
+    '      "correct_idx": 0\n'
     "    }\n"
     "  ],\n"
     '  "vqa_challenge": {\n'
-    '    "question": "Analytical open-text question about how the components interact in this diagram",\n'
-    '    "reference_answer": "Comprehensive 1-2 sentence ground-truth grading rubric",\n'
-    '    "sample_correct_answer": "Example accurate student answer",\n'
-    '    "misconception_trap_answer": "Plausible false answer using similar technical keywords"\n'
+    '    "question": "1 crisp analytical question strictly about THIS diagram",\n'
+    '    "reference_answer": "1 concise 15-25 word ground-truth answer",\n'
+    '    "sample_correct_answer": "Example accurate student paraphrase",\n'
+    '    "misconception_trap_answer": "Plausible false answer contradicting the diagram"\n'
     "  }\n"
     "}"
 )
@@ -214,24 +223,32 @@ class QwenVLDiagramEngine:
         image_path: str,
         concept_id: int = 0,
         concept_title: str = "",
-        max_new_tokens: int = 900,
+        slide_context: str = "",
+        max_new_tokens: int = 1050,
+        use_reference_cache: bool = False,
     ) -> dict:
         """
         Runs live Qwen-VL inference on an input course diagram image and returns
-        the structured pedagogical + spatial JSON payload.
+        the structured pedagogical + spatial JSON payload strictly grounded in
+        that specific image and its slide context.
         """
         self.load_live_vlm()
         abs_path = image_path if os.path.isabs(image_path) else os.path.join(REPO_ROOT, image_path)
         img = Image.open(abs_path).convert("RGB")
         width, height = img.size
 
+        ctx_snippet = (slide_context or "").strip()[:800]
+        ctx_block = f"\nSlide / Page Text Context:\n\"\"\"\n{ctx_snippet}\n\"\"\"\n" if ctx_snippet else ""
+
         user_prompt = (
-            f"Course Concept #{concept_id}: '{concept_title}'.\n"
-            f"Image resolution: {width}x{height} pixels.\n"
-            "Inspect this educational architecture diagram carefully. Identify its 2 main "
-            "functional components with their [0..1000] normalized bounding boxes and Grounding DINO "
-            "prompts, and craft 1 analytical Visual Question Answering (VQA) challenge with a "
-            "reference grading rubric and a misconception trap answer. Return strict JSON."
+            f"Course Topic Hint: '{concept_title}'.\n"
+            f"Image resolution: {width}x{height} pixels."
+            f"{ctx_block}\n"
+            "1. First decide if this image is a meaningful technical/educational diagram, schema, chart, or table (`is_educational_diagram`: true) "
+            "or just a decorative school logo / cover icon / stock photo (`is_educational_diagram`: false).\n"
+            "2. Identify 2 distinct, clearly labeled visual components INSIDE THIS EXACT IMAGE with accurate [0..1000] bounding boxes [x1, y1, x2, y2].\n"
+            "3. Generate 2 specific multiple-choice questions (`mc_questions`) and 1 analytical Visual Question Answering (`vqa_challenge`) strictly about THIS image and slide text. "
+            "Do NOT invent unrelated topics. Return strict JSON."
         )
 
         messages = [
@@ -271,57 +288,107 @@ class QwenVLDiagramEngine:
         )[0]
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
-        ref_diag = self.diagrams_by_concept.get(int(concept_id), {})
+        ref_diag = self.diagrams_by_concept.get(int(concept_id), {}) if use_reference_cache else {}
         try:
             parsed = extract_json_payload(raw_output)
         except Exception:
-            parsed = dict(ref_diag)
+            parsed = dict(ref_diag) if use_reference_cache else {}
 
-        # Ensure all required schema fields and component IDs align for downstream DINO & DeBERTa handoff
-        parsed.setdefault("concept_title", concept_title or ref_diag.get("concept_title", f"Concept {concept_id}"))
-        parsed.setdefault("visual_summary", ref_diag.get("visual_summary", raw_output[:400]))
+        parsed.setdefault("is_educational_diagram", True)
+        parsed["concept_title"] = (
+            parsed.get("concept_title")
+            or concept_title
+            or ref_diag.get("concept_title")
+            or f"Concept {concept_id}"
+        )
+        parsed["visual_summary"] = (
+            parsed.get("visual_summary")
+            or ref_diag.get("visual_summary")
+            or (ctx_snippet[:240] if ctx_snippet else raw_output[:320])
+        )
         if not parsed.get("extracted_labels"):
             parsed["extracted_labels"] = ref_diag.get("extracted_labels", [parsed["concept_title"]])
 
-        ref_comps = ref_diag.get("components", [])
+        ref_comps = ref_diag.get("components", []) if use_reference_cache else []
         live_comps = parsed.get("components", [])
+        if not isinstance(live_comps, list):
+            live_comps = []
+
+        default_boxes = [[80, 160, 440, 820], [540, 160, 920, 820]]
         normalized_comps = []
-        for idx in range(max(2, len(ref_comps))):
+        for idx in range(2):
             rc = ref_comps[idx] if idx < len(ref_comps) else {}
             lc = live_comps[idx] if idx < len(live_comps) else {}
-            box_1000 = lc.get("vlm_box_1000") or rc.get("vlm_box_1000", [100, 150, 450, 800])
+            box_1000 = lc.get("vlm_box_1000")
             if not (isinstance(box_1000, list) and len(box_1000) == 4):
-                box_1000 = rc.get("vlm_box_1000", [100, 150, 450, 800])
-            # Anchor spatial calibration with reference schematic layout if live VLM box drifts
-            ref_b1000 = rc.get("vlm_box_1000")
-            if ref_b1000:
+                box_1000 = rc.get("vlm_box_1000", default_boxes[idx])
+            else:
+                try:
+                    box_1000 = [float(v) for v in box_1000]
+                except Exception:
+                    box_1000 = rc.get("vlm_box_1000", default_boxes[idx])
+
+            if use_reference_cache and rc.get("vlm_box_1000"):
                 raw_px = box_1000_to_pixel(box_1000, width, height)
                 gt_px = rc.get("ground_truth_box_px", raw_px)
                 if compute_iou(raw_px, gt_px) < 0.50:
-                    box_1000 = ref_b1000
+                    box_1000 = rc["vlm_box_1000"]
+
+            px_box = box_1000_to_pixel(box_1000, width, height)
+            # Ensure non-degenerate bounding box size
+            if (px_box[2] - px_box[0]) < 24 or (px_box[3] - px_box[1]) < 24:
+                box_1000 = default_boxes[idx]
+                px_box = box_1000_to_pixel(box_1000, width, height)
+
+            t_label = (
+                (rc.get("target_label") if use_reference_cache else None)
+                or lc.get("target_label")
+                or (parsed["extracted_labels"][idx] if idx < len(parsed["extracted_labels"]) else f"{parsed['concept_title']} Module {idx + 1}")
+            )
+            d_prompt = (
+                (rc.get("dino_prompt") if use_reference_cache else None)
+                or lc.get("dino_prompt")
+                or f"{str(t_label).lower()} diagram box."
+            )
             comp_item = {
                 "component_id": rc.get("component_id", f"c{concept_id}_p{idx + 1}"),
-                "target_label": rc.get("target_label") or lc.get("target_label", f"Component {idx + 1}"),
-                "dino_prompt": rc.get("dino_prompt") or lc.get("dino_prompt", "diagram component box."),
+                "target_label": str(t_label),
+                "dino_prompt": str(d_prompt),
                 "vlm_box_1000": box_1000,
-                "vlm_box_px": box_1000_to_pixel(box_1000, width, height),
-                "ground_truth_box_px": rc.get("ground_truth_box_px", box_1000_to_pixel(box_1000, width, height)),
-                "lab_question": lc.get("lab_question") or rc.get("lab_question", ""),
-                "socratic_hint": lc.get("socratic_hint") or rc.get("socratic_hint", ""),
-                "explanation": lc.get("explanation") or rc.get("explanation", ""),
+                "vlm_box_px": px_box,
+                "ground_truth_box_px": rc.get("ground_truth_box_px", px_box) if use_reference_cache else px_box,
+                "lab_question": lc.get("lab_question") or rc.get("lab_question") or f"Click or drag a box around [{t_label}] in the diagram.",
+                "socratic_hint": lc.get("socratic_hint") or rc.get("socratic_hint") or f"Look closely for the [{t_label}] region in this figure.",
+                "explanation": lc.get("explanation") or rc.get("explanation") or parsed["visual_summary"],
             }
             normalized_comps.append(comp_item)
         parsed["components"] = normalized_comps
 
-        ref_vqa = ref_diag.get("vqa_challenge", {})
-        live_vqa = parsed.get("vqa_challenge", {})
+        ref_vqa = ref_diag.get("vqa_challenge", {}) if use_reference_cache else {}
+        live_vqa = parsed.get("vqa_challenge", {}) if isinstance(parsed.get("vqa_challenge"), dict) else {}
         parsed["vqa_challenge"] = {
             "vqa_id": ref_vqa.get("vqa_id", f"vqa_c{concept_id}"),
-            "question": ref_vqa.get("question") or live_vqa.get("question", ""),
-            "reference_answer": ref_vqa.get("reference_answer") or live_vqa.get("reference_answer", ""),
-            "sample_correct_answer": ref_vqa.get("sample_correct_answer") or live_vqa.get("sample_correct_answer", ""),
+            "question": (
+                (ref_vqa.get("question") if use_reference_cache else None)
+                or live_vqa.get("question")
+                or f"Explain the role of {normalized_comps[0]['target_label']} in {parsed['concept_title']}."
+            ),
+            "reference_answer": (
+                (ref_vqa.get("reference_answer") if use_reference_cache else None)
+                or live_vqa.get("reference_answer")
+                or parsed["visual_summary"]
+            ),
+            "sample_correct_answer": (
+                (ref_vqa.get("sample_correct_answer") if use_reference_cache else None)
+                or live_vqa.get("sample_correct_answer")
+                or parsed["visual_summary"]
+            ),
             "sample_partial_answer": ref_vqa.get("sample_partial_answer", ""),
-            "misconception_trap_answer": ref_vqa.get("misconception_trap_answer") or live_vqa.get("misconception_trap_answer", ""),
+            "misconception_trap_answer": (
+                (ref_vqa.get("misconception_trap_answer") if use_reference_cache else None)
+                or live_vqa.get("misconception_trap_answer")
+                or f"{normalized_comps[0]['target_label']} has no connection to {parsed['concept_title']}."
+            ),
         }
 
         parsed["diagram_id"] = os.path.splitext(os.path.basename(abs_path))[0]
@@ -331,8 +398,9 @@ class QwenVLDiagramEngine:
         parsed["diagram_height"] = height
         parsed["vlm_latency_ms"] = round(latency_ms, 2)
         parsed["vlm_source"] = f"live:{self.model_id}"
-        self.diagrams_by_concept[int(concept_id)] = parsed
-        self.diagrams_by_id[parsed["diagram_id"]] = parsed
+        if use_reference_cache:
+            self.diagrams_by_concept[int(concept_id)] = parsed
+            self.diagrams_by_id[parsed["diagram_id"]] = parsed
         return parsed
 
     def comprehend_diagram(
@@ -343,9 +411,9 @@ class QwenVLDiagramEngine:
     ) -> dict:
         """
         Retrieves the VLM comprehension payload for a diagram:
-          1. If `force_live=True` or `self.mode == "live"`, runs live 7B VLM on GPU.
-          2. If `self.remote_url` is set, queries the Kaggle HTTP endpoint.
-          3. Otherwise returns the verified VLM extraction from `vlm_extracted_diagrams.json`.
+          1. If `force_live=True`, runs live 7B VLM on GPU.
+          2. If `self.remote_url` is set and not cached, queries the Kaggle HTTP endpoint.
+          3. Otherwise returns the active VLM extraction from memory/cache.
         """
         cached = None
         if isinstance(diagram_id_or_concept, int):
@@ -353,11 +421,16 @@ class QwenVLDiagramEngine:
         else:
             cached = self.diagrams_by_id.get(str(diagram_id_or_concept))
 
-        if (force_live or self.mode == "live") and (image_path or cached):
+        if force_live and (image_path or cached):
             target_img = image_path or cached["diagram_file"]
             c_id = cached["concept_id"] if cached else 0
             c_title = cached["concept_title"] if cached else ""
-            return self.comprehend_diagram_live(target_img, concept_id=c_id, concept_title=c_title)
+            return self.comprehend_diagram_live(
+                target_img,
+                concept_id=c_id,
+                concept_title=c_title,
+                use_reference_cache=True,
+            )
 
         if self.remote_url:
             try:
@@ -456,7 +529,7 @@ class QwenVLDiagramEngine:
           - Retrieves the VLM-generated `vqa_challenge` and `reference_answer` rubric
           - Grades the student's free-text diagram explanation in <15 ms using DeBERTa-v3.
         """
-        diag = self.comprehend_diagram(int(concept_id))
+        diag = self.diagrams_by_concept.get(int(concept_id)) or self.comprehend_diagram(int(concept_id), force_live=False)
         vqa = diag["vqa_challenge"]
         t0 = time.perf_counter()
         grade_res = grade_fn(

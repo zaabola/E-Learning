@@ -45,6 +45,51 @@ SUMMARY_CSV = os.path.join(RESULTS_DIR, "vlm_benchmark_summary.csv")
 DEBERTA_CKPT = os.path.join(MODELS_ROOT, "AnswerEvaluator", "checkpoints", "deberta_v3_grader.pt")
 
 
+def _load_grader_with_kaggle_fallback(ckpt_path: str, device):
+    """
+    Loads local `deberta_v3_grader.pt` if present (local laptop or Kaggle input mount).
+    When running on a fresh Kaggle git clone where >100MB `.pt` files are git-ignored,
+    automatically downloads `cross-encoder/nli-deberta-v3-small` from Hugging Face so
+    Stage 3 runs out-of-the-box on Kaggle.
+    """
+    if os.path.exists(ckpt_path):
+        model, tok, _ = load_trained_grader(ckpt_path, device=device)
+        return model, tok, grade_student_answer
+
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    hf_id = "cross-encoder/nli-deberta-v3-small"
+    print(f"  [Info] Local `{os.path.basename(ckpt_path)}` (>100MB) not in git clone; loading `{hf_id}` on Kaggle...")
+    tok = AutoTokenizer.from_pretrained(hf_id)
+    nli_model = AutoModelForSequenceClassification.from_pretrained(hf_id).to(device).eval()
+
+    @torch.no_grad()
+    def _hf_grade_fn(model, tokenizer, reference_answer, student_answer, question="", device=None):
+        enc = tokenizer(
+            reference_answer,
+            student_answer,
+            truncation=True,
+            max_length=256,
+            return_tensors="pt",
+        ).to(device)
+        logits = model(**enc).logits[0]
+        probs = torch.softmax(logits, dim=-1).cpu().tolist()
+        # cross-encoder/nli-deberta-v3-small label mapping: 0=contradiction, 1=entailment, 2=neutral
+        id2label = {int(k): str(v).lower() for k, v in model.config.id2label.items()}
+        ent_idx = next((k for k, v in id2label.items() if "entail" in v), 1)
+        neu_idx = next((k for k, v in id2label.items() if "neutral" in v), 2)
+        score = float(probs[ent_idx] + 0.35 * probs[neu_idx])
+        verdict = "correct" if score >= 0.65 else ("partial" if score >= 0.40 else "incorrect")
+        return {
+            "verdict": verdict,
+            "binary_correct": 1 if verdict == "correct" else 0,
+            "semantic_score": round(score, 4),
+            "rpg_damage_multiplier": round(0.20 + 0.80 * score, 3) if verdict != "incorrect" else 0.0,
+        }
+
+    return nli_model, tok, _hf_grade_fn
+
+
 def run_benchmark(live_vlm: bool = False, model_id: str = DEFAULT_MODEL_ID, remote_url: str = None):
     os.makedirs(RESULTS_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -64,7 +109,9 @@ def run_benchmark(live_vlm: bool = False, model_id: str = DEFAULT_MODEL_ID, remo
         device=str(device),
     )
     dino_eval = GroundingDINODiagramEvaluator(device=device, prewarm=False)
-    grader_model, grader_tokenizer, _ = load_trained_grader(DEBERTA_CKPT, device=device)
+    grader_model, grader_tokenizer, active_grade_fn = _load_grader_with_kaggle_fallback(
+        DEBERTA_CKPT, device=device
+    )
 
     # -------------------------------------------------------------------------
     # STAGE 1: VLM Schema & Visual Comprehension Verification (5 Diagrams)
@@ -129,7 +176,7 @@ def run_benchmark(live_vlm: bool = False, model_id: str = DEFAULT_MODEL_ID, remo
             student_answer=vqa["sample_correct_answer"],
             grader_model=grader_model,
             grader_tokenizer=grader_tokenizer,
-            grade_fn=grade_student_answer,
+            grade_fn=active_grade_fn,
             device=device,
         )
         res_trap = vlm_engine.evaluate_vqa_with_deberta(
@@ -137,7 +184,7 @@ def run_benchmark(live_vlm: bool = False, model_id: str = DEFAULT_MODEL_ID, remo
             student_answer=vqa["misconception_trap_answer"],
             grader_model=grader_model,
             grader_tokenizer=grader_tokenizer,
-            grade_fn=grade_student_answer,
+            grade_fn=active_grade_fn,
             device=device,
         )
 

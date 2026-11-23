@@ -83,7 +83,8 @@ class GroundingDINODiagramEvaluator:
         else:
             self.device = device
 
-        source = CKPT_DIR if os.path.exists(CKPT_DIR) else "IDEA-Research/grounding-dino-tiny"
+        safetensors_path = os.path.join(CKPT_DIR, "model.safetensors")
+        source = CKPT_DIR if os.path.exists(safetensors_path) else "IDEA-Research/grounding-dino-tiny"
         self.processor = AutoProcessor.from_pretrained(source)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(source).to(self.device).eval()
         self.num_params = sum(p.numel() for p in self.model.parameters())

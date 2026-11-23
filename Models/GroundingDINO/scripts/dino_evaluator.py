@@ -1,9 +1,15 @@
 """
-Model #3: Grounding DINO Zero-Shot Visual Diagram Evaluator (`dino_evaluator.py`)
-=================================================================================
-Loads the local `IDEA-Research/grounding-dino-tiny` checkpoint from:
-  `Models/GroundingDINO/checkpoints/grounding_dino_tiny/`
-and evaluates student clicks or dragged bounding boxes on in-game laboratory
+Model #4: Grounding DINO / LLMDet Zero-Shot Visual Diagram Evaluator (`dino_evaluator.py`)
+==========================================================================================
+Automatically selects the strongest open-vocabulary Grounding DINO detector available
+for the current hardware:
+  - Kaggle / High-VRAM GPU (>=10 GB): `iSEE-Laboratory/llmdet_large` (LLMDet-Large,
+    CVPR 2025 Swin-Large Grounding DINO), with automatic fallback to
+    `IDEA-Research/grounding-dino-base` -> `IDEA-Research/grounding-dino-tiny`.
+  - Local 4 GB GPU: local `Models/GroundingDINO/checkpoints/grounding_dino_tiny/`
+    checkpoint (`IDEA-Research/grounding-dino-tiny`).
+
+Evaluates student clicks or dragged bounding boxes on in-game laboratory
 technical diagrams (100% privacy-preserving, zero webcam).
 """
 
@@ -71,8 +77,9 @@ def center_distance_norm(x: float, y: float, box) -> float:
 
 class GroundingDINODiagramEvaluator:
     """
-    Wraps `IDEA-Research/grounding-dino-tiny` for zero-shot diagram grounding
-    and student click/bounding-box verification in KnowledgeQuest.
+    Wraps `iSEE-Laboratory/llmdet_large` (primary on Kaggle GPUs) with automatic
+    fallback to `IDEA-Research/grounding-dino-base` and `IDEA-Research/grounding-dino-tiny`
+    for zero-shot diagram grounding and student click/bounding-box verification.
     """
 
     def __init__(self, device=None, prewarm: bool = False):
@@ -83,13 +90,19 @@ class GroundingDINODiagramEvaluator:
         else:
             self.device = device
 
+        self.processor = None
+        self.model = None
+        self.model_id = None
+        self.model_display_name = "Grounding-DINO-Tiny"
+        self._is_llmdet = False
+        self.active_vlm_name = "Qwen3-VL-8B"
+
         safetensors_path = os.path.join(CKPT_DIR, "model.safetensors")
         if os.path.exists(safetensors_path):
-            source = CKPT_DIR
-            self.model_display_name = "Grounding-DINO-Tiny"
+            candidates = [(CKPT_DIR, "Grounding-DINO-Tiny", False)]
         else:
-            # Upgrade automatically to Grounding-DINO-Base on high-VRAM Kaggle GPUs (>=10GB),
-            # keeping Grounding-DINO-Tiny as automatic fallback!
+            # Upgrade automatically to LLMDet-Large (CVPR 2025 Swin-L Grounding DINO) on
+            # high-VRAM Kaggle GPUs (>=10GB), with Grounding-DINO-Base & Tiny as fallbacks!
             high_vram = False
             if torch.cuda.is_available():
                 try:
@@ -97,20 +110,39 @@ class GroundingDINODiagramEvaluator:
                     high_vram = vram_gb >= 10.0
                 except Exception:
                     high_vram = False
-            primary = "IDEA-Research/grounding-dino-base" if high_vram else "IDEA-Research/grounding-dino-tiny"
-            try:
-                self.processor = AutoProcessor.from_pretrained(primary)
-                self.model = AutoModelForZeroShotObjectDetection.from_pretrained(primary).to(self.device).eval()
-                self.model_display_name = "Grounding-DINO-Base" if "base" in primary else "Grounding-DINO-Tiny"
-                source = None
-            except Exception:
-                source = "IDEA-Research/grounding-dino-tiny"
-                self.model_display_name = "Grounding-DINO-Tiny"
+            if high_vram:
+                candidates = [
+                    ("iSEE-Laboratory/llmdet_large", "LLMDet-Large", True),
+                    ("IDEA-Research/grounding-dino-base", "Grounding-DINO-Base", False),
+                    ("IDEA-Research/grounding-dino-tiny", "Grounding-DINO-Tiny", False),
+                ]
+            else:
+                candidates = [("IDEA-Research/grounding-dino-tiny", "Grounding-DINO-Tiny", False)]
 
-        if source is not None:
-            self.processor = AutoProcessor.from_pretrained(source)
-            self.model = AutoModelForZeroShotObjectDetection.from_pretrained(source).to(self.device).eval()
+        last_err = None
+        for src, disp_name, is_llmdet in candidates:
+            try:
+                print(f"[DINO] Loading {disp_name} ({src})...", flush=True)
+                proc = AutoProcessor.from_pretrained(src)
+                mod = AutoModelForZeroShotObjectDetection.from_pretrained(src).to(self.device).eval()
+                self.processor = proc
+                self.model = mod
+                self.model_id = src
+                self.model_display_name = disp_name
+                self._is_llmdet = is_llmdet
+                break
+            except Exception as exc:
+                last_err = exc
+                print(f"[DINO] Warning: Could not load {disp_name} ({src}): {exc}", flush=True)
+
+        if self.model is None:
+            raise RuntimeError(f"Failed to load any Grounding DINO / LLMDet model: {last_err}")
+
         self.num_params = sum(p.numel() for p in self.model.parameters())
+        print(
+            f"[DINO] Ready: {self.model_display_name} ({self.num_params:,} params, device={self.device})",
+            flush=True,
+        )
 
         self.puzzles = {}
         self.puzzles_list = []
@@ -134,11 +166,67 @@ class GroundingDINODiagramEvaluator:
             return self.puzzles_list
         return [p for p in self.puzzles_list if int(p["concept_id"]) == int(concept_id)]
 
+    def detect_boxes(
+        self,
+        img: Image.Image,
+        prompt: str,
+        threshold: float = 0.18,
+        target_sizes=None,
+    ):
+        """
+        Unified zero-shot detection helper supporting BOTH:
+          - `LLMDet-Large` (`text=[[clean_label]]`, `post_process_grounded_object_detection(outputs, threshold=..., target_sizes=...)`)
+          - `Grounding-DINO-Base` / `Tiny` (`text="label."`, `post_process_grounded_object_detection(outputs, inputs.input_ids, threshold=..., text_threshold=..., target_sizes=...)`)
+        Returns `(raw_boxes, raw_scores, latency_ms)`.
+        """
+        if target_sizes is None:
+            target_sizes = [(img.height, img.width)]
+
+        t0 = time.perf_counter()
+        if self._is_llmdet:
+            clean_label = (prompt or "diagram component").strip().rstrip(".").strip()
+            if not clean_label:
+                clean_label = "diagram component"
+            inputs = self.processor(
+                images=img,
+                text=[[clean_label]],
+                return_tensors="pt",
+            ).to(self.device)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+            results = self.processor.post_process_grounded_object_detection(
+                outputs=outputs,
+                threshold=float(threshold),
+                target_sizes=target_sizes,
+            )[0]
+        else:
+            clean_prompt = (prompt or "diagram component.").strip()
+            if not clean_prompt.endswith("."):
+                clean_prompt = clean_prompt + "."
+            inputs = self.processor(
+                images=img,
+                text=clean_prompt,
+                return_tensors="pt",
+            ).to(self.device)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+            results = self.processor.post_process_grounded_object_detection(
+                outputs,
+                inputs.input_ids,
+                threshold=min(float(threshold), 0.14),
+                text_threshold=0.10,
+                target_sizes=target_sizes,
+            )[0]
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        raw_boxes = results["boxes"].detach().cpu().tolist()
+        raw_scores = [float(s) for s in results["scores"].detach().cpu().tolist()]
+        return raw_boxes, raw_scores, latency_ms
+
     def ground_puzzle(self, puzzle_id: str, force_live: bool = False) -> dict:
         """
-        Runs Grounding DINO zero-shot open-vocabulary detection on the puzzle's
-        course diagram and aligns the best neural candidate box with the diagram's
-        structural component layout.
+        Runs LLMDet-Large / Grounding DINO zero-shot open-vocabulary detection on the
+        puzzle's course diagram and aligns the best neural candidate box with the
+        diagram's structural component layout.
         """
         if not force_live and puzzle_id in self._grounding_cache:
             return self._grounding_cache[puzzle_id]
@@ -153,23 +241,14 @@ class GroundingDINODiagramEvaluator:
         if not prompt.strip().endswith("."):
             prompt = prompt.strip() + "."
 
-        t0 = time.perf_counter()
-        inputs = self.processor(images=img, text=prompt, return_tensors="pt").to(self.device)
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-
-        results = self.processor.post_process_grounded_object_detection(
-            outputs,
-            inputs.input_ids,
-            threshold=0.12,
-            text_threshold=0.10,
+        raw_boxes, raw_scores, latency_ms = self.detect_boxes(
+            img=img,
+            prompt=prompt,
+            threshold=0.20 if self._is_llmdet else 0.12,
             target_sizes=[(img.height, img.width)],
-        )[0]
-        latency_ms = (time.perf_counter() - t0) * 1000.0
+        )
 
         target_box = [float(v) for v in p["target_box"]]
-        raw_boxes = results["boxes"].detach().cpu().tolist()
-        raw_scores = [float(s) for s in results["scores"].detach().cpu().tolist()]
 
         best_raw_box = None
         best_raw_score = 0.0
@@ -188,7 +267,7 @@ class GroundingDINODiagramEvaluator:
             best_raw_box = target_box
             best_raw_score = 0.35
 
-        # Calibrated dual-vision target box (blends Grounding DINO proposal when high-IoU with Qwen2.5-VL box)
+        # Calibrated dual-vision target box (blends detector proposal when high-IoU with VLM box)
         raw_iou = compute_iou(best_raw_box, target_box)
         if raw_iou >= 0.55:
             grounded_box = [
@@ -323,5 +402,5 @@ class GroundingDINODiagramEvaluator:
             "dino_latency_ms": g["dino_latency_ms"],
             "feedback": feedback,
             "explanation": p["explanation"],
-            "graded_by": f"Qwen2.5-VL + {getattr(self, 'model_display_name', 'Grounding-DINO-Tiny')} ({self.device.type.upper()})",
+            "graded_by": f"{getattr(self, 'active_vlm_name', 'Qwen3-VL-8B')} + {getattr(self, 'model_display_name', 'Grounding-DINO-Tiny')} ({self.device.type.upper()})",
         }

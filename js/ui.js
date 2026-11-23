@@ -1219,8 +1219,8 @@ const UI = (() => {
                 &bull; <strong>Model #1 (DKT):</strong> ${escHtml((m.dkt && m.dkt.name) || 'Final-DKT-GRU')} (AUC: 0.7996) &nbsp;
                 &bull; <strong>Model #2 (RL GM):</strong> ${escHtml((m.rl && m.rl.name) || 'Double-DQN')}<br>
                 &bull; <strong>Model #3 (Grader):</strong> ${escHtml((m.grader && m.grader.name) || 'DeBERTa-v3-Small')} &nbsp;
-                &bull; <strong>Model #4 (Spatial):</strong> ${escHtml((m.dino && m.dino.name) || 'Grounding-DINO-Tiny')}<br>
-                &bull; <strong>Model #5 (VLM):</strong> ${escHtml((m.vlm && m.vlm.name) || 'Qwen/Qwen2.5-VL-7B-Instruct')} (Dual-Vision Fused IoU: 0.993)
+                &bull; <strong>Model #4 (Spatial):</strong> ${escHtml((m.dino && m.dino.name) || 'LLMDet-Large / Grounding-DINO')}<br>
+                &bull; <strong>Model #5 (VLM):</strong> ${escHtml((m.vlm && m.vlm.name) || 'Qwen/Qwen3-VL-8B-Instruct')} (Dual-Vision Fused IoU: 0.993)
               </div>
               <div style="margin-bottom:8px">
                 <button type="button" class="ai-btn-primary" id="kq-open-dino-btn">&#128269; LAUNCH VLM + GROUNDING DINO LAB MONITOR (10 PUZZLES + VQA)</button>
@@ -1244,9 +1244,9 @@ const UI = (() => {
                   </label>
                 </div>
                 <input type="text" id="kq-new-title" placeholder="2. Optional Course Title (auto-filled from PDF/PPTX/DOCX filename if left empty)" style="width:100%;box-sizing:border-box;background:#0b1320;color:#fff;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:15px;margin-bottom:5px" />
-                <textarea id="kq-new-notes" rows="2" placeholder="3. Optional Notes (Leave empty when uploading PDF/PPTX/Word — Qwen2.5-VL-7B will inspect the document & extract photos/concepts automatically!)" style="width:100%;box-sizing:border-box;background:#0b1320;color:#dce8f6;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:14.5px;margin-bottom:5px"></textarea>
+                <textarea id="kq-new-notes" rows="2" placeholder="3. Optional Notes (Leave empty when uploading PDF/PPTX/Word — Qwen3-VL-8B will inspect the document & extract photos/concepts automatically!)" style="width:100%;box-sizing:border-box;background:#0b1320;color:#dce8f6;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:14.5px;margin-bottom:5px"></textarea>
                 <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
-                  <button type="button" class="ai-btn-primary" id="kq-ingest-btn" style="width:100%;padding:7px 12px">&#9889; INGEST DOCUMENT WITH QWEN2.5-VL-7B + GROUNDING DINO &amp; LAUNCH LAB</button>
+                  <button type="button" class="ai-btn-primary" id="kq-ingest-btn" style="width:100%;padding:7px 12px">&#9889; INGEST DOCUMENT WITH ${escHtml(((m.vlm && m.vlm.short_name) || 'QWEN3-VL-8B').toUpperCase())} + ${escHtml(((m.dino && m.dino.name) || 'LLMDET-LARGE').toUpperCase())} &amp; LAUNCH LAB</button>
                 </div>
               </div>
             </div>
@@ -1349,8 +1349,8 @@ const UI = (() => {
             ].join('\n'));
             ingestBtn.disabled = true;
             ingestBtn.textContent = hasFile
-              ? `QWEN2.5-VL-7B INSPECTING '${fileName.slice(0, 26)}' & EXTRACTING PHOTOS...`
-              : 'INGESTING WITH QWEN2.5-VL-7B + GROUNDING DINO...';
+              ? `VLM INSPECTING '${fileName.slice(0, 26)}' & EXTRACTING PHOTOS...`
+              : 'INGESTING WITH QWEN3-VL-8B + GROUNDING DINO...';
             Sfx.select();
 
             let fileB64 = null;
@@ -1651,12 +1651,16 @@ const UI = (() => {
 
         const vqaQ = p.vlm_vqa_question || `Explain how [${p.target_label}] functions inside ${p.concept_title}.`;
         const vqaRef = p.vlm_vqa_reference || p.explanation || '';
+        const stInfo = (typeof AITutor !== 'undefined' && AITutor.getStatus) ? AITutor.getStatus() : {};
+        const modInfo = stInfo.models || {};
+        const vlmShort = (modInfo.vlm && modInfo.vlm.short_name) || (p.vlm_model && p.vlm_model.includes('Qwen3') ? 'Qwen3-VL-8B' : 'Qwen3-VL-8B');
+        const dinoShort = (modInfo.dino && modInfo.dino.name) || 'LLMDet-Large';
 
         scr.innerHTML = `
           <div class="kq-journal-win" style="padding:10px 14px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px">
               <div>
-                <div class="quest-title-badge" style="color:#58f898">PROF. ADA'S LAB MONITOR &mdash; Qwen2.5-VL-7B + GROUNDING DINO</div>
+                <div class="quest-title-badge" style="color:#58f898">PROF. ADA'S LAB MONITOR &mdash; ${escHtml(vlmShort)} + ${escHtml(dinoShort.toUpperCase())}</div>
               </div>
               <div style="display:flex;align-items:center;gap:6px">
                 <span class="ai-dot ${live ? '' : 'offline'}"></span>
@@ -1676,7 +1680,7 @@ const UI = (() => {
             ${statusFooter}
             <div style="background:#101b2c;border:1px solid #3a5c88;border-radius:5px;padding:6px 9px;margin-top:6px">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px">
-                <span style="font-size:8px;color:#68c8ff">VLM VISUAL QUESTION (Qwen2.5-VL-7B &rarr; DeBERTa-v3 Grader):</span>
+                <span style="font-size:8px;color:#68c8ff">VLM VISUAL QUESTION (${escHtml(vlmShort)} &rarr; DeBERTa-v3 Grader):</span>
                 <button type="button" class="ai-btn-mini" id="dino-vqa-fill">Auto-Fill Answer</button>
               </div>
               <div style="font-family:var(--dialog-font);font-size:15px;color:#e4eef8;margin-bottom:4px">${escHtml(vqaQ)}</div>
@@ -1817,6 +1821,9 @@ const UI = (() => {
 
       function render() {
         const unlocked = Boolean(uploadedCourse && !uploading);
+        const stMeta = (typeof AITutor !== 'undefined' && AITutor.getStatus) ? AITutor.getStatus() : {};
+        const vlmTag = ((stMeta.models && stMeta.models.vlm && stMeta.models.vlm.short_name) || 'QWEN3-VL-8B').toUpperCase();
+        const dinoTag = ((stMeta.models && stMeta.models.dino && stMeta.models.dino.name) || 'LLMDET-LARGE').toUpperCase();
         wrap.innerHTML = `
           <div style="position:absolute;left:16px;bottom:42px;width:210px;background:rgba(12,20,34,0.95);border:3px solid #f0e8d0;border-radius:8px;padding:10px;box-shadow:0 6px 18px rgba(0,0,0,0.6)">
             <div style="font-size:8px;color:#f8d048;margin-bottom:8px;text-align:center">MAIN MENU</div>
@@ -1833,7 +1840,7 @@ const UI = (() => {
           <div style="position:absolute;right:16px;bottom:42px;width:448px;background:rgba(12,20,34,0.95);border:3px solid ${unlocked ? '#58f898' : '#58a8f8'};border-radius:8px;padding:10px 12px;box-shadow:0 6px 18px rgba(0,0,0,0.6)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
               <span style="font-size:8.5px;color:${unlocked ? '#58f898' : '#68c8ff'}">&#128218; INSERT COURSE (PDF / PPTX / WORD)</span>
-              <span style="font-size:7.5px;color:#f8d048">QWEN2.5-VL-7B + DINO</span>
+              <span style="font-size:7.5px;color:#f8d048">${escHtml(vlmTag)} + ${escHtml(dinoTag)}</span>
             </div>
             <div style="background:#09111c;border:1px dashed #4a82bc;border-radius:5px;padding:6px 8px;margin-bottom:6px">
               <input type="file" id="ts-course-file" accept=".pdf,.pptx,.ppt,.docx,.doc,image/*" ${uploading ? 'disabled' : ''} style="width:100%;font-size:11.5px;color:#dce8f6;cursor:pointer" />
@@ -1933,7 +1940,7 @@ const UI = (() => {
                 },
                 (pct, stepMsg) => {
                   progressPct = Math.max(progressPct, Number(pct) || 10);
-                  progressStep = stepMsg || 'Analyzing with Qwen2.5-VL-7B...';
+                  progressStep = stepMsg || 'Analyzing with Qwen3-VL-8B + LLMDet-Large...';
                   const bar = wrap.querySelector('#ts-prog-bar');
                   const txt = wrap.querySelector('#ts-prog-text');
                   if (bar) bar.style.width = `${progressPct}%`;

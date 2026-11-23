@@ -2,10 +2,11 @@
 Turnkey Kaggle 2x T4 GPU Launcher for the Full RPG + 5-Model AI Engine
 (`kaggle_run_game.py`)
 ======================================================================
-Runs the complete browser RPG + all 5 AI models (`Qwen2.5-VL-7B-Instruct`,
-`Grounding-DINO-Tiny`, `DeBERTa-v3-Small`, `Final-DKT-GRU`, `Double-DQN`)
-100% on Kaggle's GPUs (zero load on your local PC!) and opens a public
-HTTPS URL (`https://....trycloudflare.com`) that you click to play in your browser.
+Runs the complete browser RPG + all 5 AI models (`Qwen3-VL-8B-Instruct`
+with `Qwen2.5-VL-7B-Instruct` fallback, `LLMDet-Large` with
+`Grounding-DINO-Base/Tiny` fallback, `DeBERTa-v3-Small`, `Final-DKT-GRU`,
+`Double-DQN`) 100% on Kaggle's GPUs (zero load on your local PC!) and opens
+a public HTTPS URL (`https://....trycloudflare.com`) to play in your browser.
 
 Usage inside a Kaggle GPU Notebook (Accelerator: GPU T4 x2, Internet: ON):
   !git pull origin interactive_learning_RPG
@@ -67,7 +68,7 @@ def _start_cloudflare_tunnel(port: int = 8000):
                 print("    1. Click the link above to open the RPG in your browser.")
                 print("    2. Press ENTER -> select NEW COURSE (or JOURNAL -> Tab [3]).")
                 print("    3. Select any .pdf, .pptx, or .docx file from your computer.")
-                print("    4. Click INGEST DOCUMENT — Kaggle's Qwen2.5-VL-7B + Grounding DINO")
+                print("    4. Click INGEST DOCUMENT — Kaggle's Qwen3-VL-8B + LLMDet-Large")
                 print("       will extract the photos & concepts and launch the Lab Monitor!")
                 print("=" * 88 + "\n", flush=True)
 
@@ -77,10 +78,10 @@ def _start_cloudflare_tunnel(port: int = 8000):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run full RPG + Live Qwen2.5-VL-7B on Kaggle GPUs")
+    parser = argparse.ArgumentParser(description="Run full RPG + Live Qwen3-VL-8B + LLMDet-Large on Kaggle GPUs")
     parser.add_argument("--port", type=int, default=8000, help="HTTP port (default: 8000)")
-    parser.add_argument("--model", default="Qwen/Qwen2.5-VL-7B-Instruct", help="Hugging Face VLM ID")
-    parser.add_argument("--no-live-vlm", action="store_true", help="Skip loading 7B VLM weights")
+    parser.add_argument("--model", default="Qwen/Qwen3-VL-8B-Instruct", help="Hugging Face VLM ID (fallback: Qwen/Qwen2.5-VL-7B-Instruct)")
+    parser.add_argument("--no-live-vlm", action="store_true", help="Skip loading live VLM weights")
     args = parser.parse_args()
 
     print("=" * 88)

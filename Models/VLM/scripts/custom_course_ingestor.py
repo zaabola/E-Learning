@@ -622,14 +622,16 @@ def ingest_custom_course_package(
         vlm_engine is not None
         and (vlm_engine.mode == "live" or vlm_engine.vlm_model is not None)
     )
+    vlm_name = getattr(vlm_engine, "short_model_name", "Qwen3-VL-8B") if vlm_engine is not None else "Qwen3-VL-8B"
+    dino_name = getattr(dino_evaluator, "model_display_name", "Grounding-DINO") if dino_evaluator is not None else "Grounding-DINO"
 
     _report(
         16,
-        f"Found {doc_info['total_unique_found']} unique diagrams across {doc_info['total_pages']} pages (skipped logos). Inspecting with Qwen2.5-VL-7B...",
+        f"Found {doc_info['total_unique_found']} unique diagrams across {doc_info['total_pages']} pages (skipped logos). Inspecting with {vlm_name}...",
     )
 
-    # Run live Qwen2.5-VL-7B (FP16) inspection on candidate diagrams, automatically
-    # skipping any decorative image where Qwen2.5-VL-7B says `is_educational_diagram: false`!
+    # Run live Qwen-VL (FP16) inspection on candidate diagrams, automatically
+    # skipping any decorative image where the VLM says `is_educational_diagram: false`!
     accepted_slots = []
     cand_cursor = 0
 
@@ -639,14 +641,14 @@ def ingest_custom_course_package(
         slot_idx = len(accepted_slots)
         _report(
             20 + slot_idx * 14,
-            f"Qwen2.5-VL-7B (FP16) inspecting Page {cand['page']} diagram ({slot_idx + 1}/5): {cand['slide_title'][:34]}...",
+            f"{vlm_name} (FP16) inspecting Page {cand['page']} diagram ({slot_idx + 1}/5): {cand['slide_title'][:34]}...",
         )
 
         vlm_res = None
         if vlm_is_live:
             try:
                 print(
-                    f"  [Qwen2.5-VL-7B LIVE] Concept C{slot_idx} | Page {cand['page']} ({cand['slide_title']})...",
+                    f"  [{vlm_name} LIVE] Concept C{slot_idx} | Page {cand['page']} ({cand['slide_title']})...",
                     flush=True,
                 )
                 vlm_res = vlm_engine.comprehend_diagram_live(
@@ -656,12 +658,14 @@ def ingest_custom_course_package(
                     slide_context=cand["slide_text"],
                     use_reference_cache=False,  # CRITICAL: NEVER mix old YOLO/OCR cache!
                 )
-                # If Qwen2.5-VL-7B flags this as a logo/non-educational image and more candidates remain, skip it!
+                # Refresh vlm_name in case load_live_vlm() fell back to Qwen2.5-VL-7B
+                vlm_name = getattr(vlm_engine, "short_model_name", vlm_name)
+                # If VLM flags this as a logo/non-educational image and more candidates remain, skip it!
                 if vlm_res.get("is_educational_diagram") is False and (len(candidates) - cand_cursor) >= (5 - len(accepted_slots)):
-                    print(f"  [Qwen2.5-VL-7B FILTER] Rejected decorative/logo image on Page {cand['page']}.", flush=True)
+                    print(f"  [{vlm_name} FILTER] Rejected decorative/logo image on Page {cand['page']}.", flush=True)
                     continue
             except Exception as e:
-                print(f"  [Qwen2.5-VL-7B LIVE] Error on Page {cand['page']}: {e}", flush=True)
+                print(f"  [{vlm_name} LIVE] Error on Page {cand['page']}: {e}", flush=True)
 
         accepted_slots.append({"cand": cand, "vlm": vlm_res})
 
@@ -776,42 +780,57 @@ def ingest_custom_course_package(
                 d_prompt = d_prompt.strip() + "."
 
             vlm_box_px = [float(v) for v in comp.get("vlm_box_px", [60.0, 80.0, 340.0, 340.0])]
-            grounding_tier = comp.get("grounding_tier", "Qwen2.5-VL-FP16")
+            grounding_tier = comp.get("grounding_tier", f"{vlm_name}-FP16")
             refined_box = vlm_box_px
 
-            # Refine with Grounding-DINO-Base/Tiny only when high-IoU consensus confirms the VLM box
+            # Refine with LLMDet-Large / Grounding-DINO only when high-IoU consensus confirms the VLM box
             if dino_evaluator is not None and os.path.exists(abs_diag):
                 try:
                     pil_im = Image.open(abs_diag).convert("RGB")
-                    inputs = dino_evaluator.processor(
-                        images=pil_im, text=d_prompt, return_tensors="pt"
-                    ).to(dino_evaluator.device)
-                    with torch.no_grad():
-                        outputs = dino_evaluator.model(**inputs)
-                    dres = dino_evaluator.processor.post_process_grounded_object_detection(
-                        outputs,
-                        inputs.input_ids,
-                        threshold=0.18,
-                        text_threshold=0.14,
-                        target_sizes=[(420, 720)],
-                    )[0]
-                    d_boxes = dres["boxes"].detach().cpu().tolist()
-                    d_scores = dres["scores"].detach().cpu().tolist()
-                    if d_boxes:
-                        # Blend Grounding DINO box with Qwen2.5-VL-7B box if they overlap reasonably
-                        best_d = d_boxes[int(np.argmax(d_scores))]
-                        best_d = [round(float(v), 1) for v in best_d]
-                        # Compute IoU
-                        ix1 = max(vlm_box_px[0], best_d[0])
-                        iy1 = max(vlm_box_px[1], best_d[1])
-                        ix2 = min(vlm_box_px[2], best_d[2])
-                        iy2 = min(vlm_box_px[3], best_d[3])
+                    if hasattr(dino_evaluator, "detect_boxes"):
+                        d_boxes, d_scores, _ = dino_evaluator.detect_boxes(
+                            img=pil_im,
+                            prompt=d_prompt,
+                            threshold=0.20,
+                            target_sizes=[(420, 720)],
+                        )
+                    else:
+                        inputs = dino_evaluator.processor(
+                            images=pil_im, text=d_prompt, return_tensors="pt"
+                        ).to(dino_evaluator.device)
+                        with torch.no_grad():
+                            outputs = dino_evaluator.model(**inputs)
+                        dres = dino_evaluator.processor.post_process_grounded_object_detection(
+                            outputs,
+                            inputs.input_ids,
+                            threshold=0.18,
+                            text_threshold=0.14,
+                            target_sizes=[(420, 720)],
+                        )[0]
+                        d_boxes = dres["boxes"].detach().cpu().tolist()
+                        d_scores = dres["scores"].detach().cpu().tolist()
+
+                    best_match_box = None
+                    best_match_iou = 0.0
+                    best_match_comb = -1.0
+                    area_v = max(1.0, (vlm_box_px[2] - vlm_box_px[0]) * (vlm_box_px[3] - vlm_box_px[1]))
+                    for cand_box, cand_score in zip(d_boxes, d_scores):
+                        cb = [round(float(v), 1) for v in cand_box]
+                        ix1 = max(vlm_box_px[0], cb[0])
+                        iy1 = max(vlm_box_px[1], cb[1])
+                        ix2 = min(vlm_box_px[2], cb[2])
+                        iy2 = min(vlm_box_px[3], cb[3])
                         inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-                        area_v = max(1.0, (vlm_box_px[2] - vlm_box_px[0]) * (vlm_box_px[3] - vlm_box_px[1]))
-                        area_d = max(1.0, (best_d[2] - best_d[0]) * (best_d[3] - best_d[1]))
+                        area_d = max(1.0, (cb[2] - cb[0]) * (cb[3] - cb[1]))
                         iou = inter / (area_v + area_d - inter)
-                        if iou >= 0.25:
-                            refined_box = [round(0.60 * vlm_box_px[i] + 0.40 * best_d[i], 1) for i in range(4)]
+                        comb = 0.65 * iou + 0.35 * float(cand_score)
+                        if comb > best_match_comb:
+                            best_match_comb = comb
+                            best_match_iou = iou
+                            best_match_box = cb
+                    if best_match_box is not None and best_match_iou >= 0.40:
+                        refined_box = [round(0.70 * vlm_box_px[i] + 0.30 * best_match_box[i], 1) for i in range(4)]
+                        grounding_tier = f"{vlm_name} + {dino_name}"
                 except Exception:
                     pass
 
@@ -969,7 +988,7 @@ def ingest_custom_course_package(
             f"Extracted from {upload_name or 'Document'} "
             f"({doc_info['total_unique_found']} Unique Figures Found -> 5 Chapter Diagrams, 10 VLM+DINO Puzzles)"
         ),
-        "mentor": "Prof. Ada (Qwen2.5-VL-7B + Grounding DINO Lab)",
+        "mentor": f"Prof. Ada ({vlm_name} + {dino_name} Lab)",
         "num_photos_extracted": len(candidates),
         "total_unique_found": doc_info["total_unique_found"],
         "source_file": upload_name,

@@ -48,7 +48,7 @@ class GameServerState:
         default_course: str = 'vision_yolo_ocr',
         default_profile: str = 'average',
         vlm_mode: str = 'hybrid',
-        vlm_model_id: str = 'Qwen/Qwen2.5-VL-7B-Instruct',
+        vlm_model_id: str = 'Qwen/Qwen3-VL-8B-Instruct',
     ):
         self.lock = threading.Lock()
         self.engine = KnowledgeQuestAIEngine(vlm_mode=vlm_mode, vlm_model_id=vlm_model_id)
@@ -338,8 +338,8 @@ def main():
     parser.add_argument('--port', type=int, default=8000, help='Port (default: 8000)')
     parser.add_argument('--course', default='vision_yolo_ocr', help='Initial course ID')
     parser.add_argument('--profile', default='average', choices=['struggling', 'average', 'advanced'])
-    parser.add_argument('--live-vlm', action='store_true', help='Load live 7B VLM on GPU (for Kaggle 2x T4)')
-    parser.add_argument('--vlm-model', default='Qwen/Qwen2.5-VL-7B-Instruct', help='Hugging Face VLM model ID')
+    parser.add_argument('--live-vlm', action='store_true', help='Load live 8B/7B VLM on GPU (for Kaggle 2x T4)')
+    parser.add_argument('--vlm-model', default='Qwen/Qwen3-VL-8B-Instruct', help='Hugging Face VLM model ID')
     parser.add_argument('--open', action='store_true', help='Open browser automatically')
     args = parser.parse_args()
 

@@ -2,28 +2,31 @@
 Vision-Language Model (VLM) Course Slide & Diagram Comprehension Engine
 (`Models/VLM/scripts/vlm_diagram_engine.py`)
 =======================================================================
-Integrates `Qwen/Qwen2.5-VL-7B-Instruct` (or `Qwen/Qwen2-VL-7B-Instruct`)
-into the E-Learning RPG multimodal pipeline:
+Integrates `Qwen/Qwen3-VL-8B-Instruct` (primary, with automatic fallback to
+`Qwen/Qwen2.5-VL-7B-Instruct` and `Qwen/Qwen2-VL-7B-Instruct`) into the
+E-Learning RPG multimodal pipeline:
 
   1. [Visual Slide & Diagram Comprehension]:
      Reads any uploaded course diagram or lecture figure and extracts:
-       - Academic concept summary & OCR labels/formulas
+       - Academic concept summary & verbatim diagram labels/formulas
        - Distinct visual components + natural-language `dino_prompt`s
-       - Qwen-VL [0..1000] normalized bounding boxes -> pixel coordinates
+       - Native VLM bounding boxes (`[0..1000]` normalized for Qwen3-VL;
+         `image_grid_thw` absolute pixels for Qwen2.5-VL) -> canvas pixels
        - Interactive Lab Monitor investigation prompts & Socratic hints
        - Open-ended Visual Question Answering (VQA) battle challenges + reference rubrics
 
   2. [VLM -> Grounding DINO Dual-Vision Spatial Handoff]:
      Passes the VLM-generated `dino_prompt`s into `GroundingDINODiagramEvaluator`
-     (`IDEA-Research/grounding-dino-tiny`) and fuses Qwen-VL's grounding box with
-     Grounding DINO's zero-shot detection box.
+     (`iSEE-Laboratory/llmdet_large` on Kaggle, falling back to
+     `IDEA-Research/grounding-dino-base` / `grounding-dino-tiny`) and fuses the
+     VLM grounding box with Grounding DINO's zero-shot detection box.
 
   3. [VLM -> DeBERTa-v3 Visual Question Answering (VQA) Handoff]:
      Uses the VLM-generated `reference_answer` rubric to score student open-text
      explanations about the diagram in <15 ms via `DeBERTa-v3-Small`.
 
 Supports 3 execution modes:
-  - `mode="live"`   : Loads the 7B VLM weights directly on GPU (for Kaggle 2x T4 30GB VRAM).
+  - `mode="live"`   : Loads the 8B/7B VLM weights directly on GPU (for Kaggle 2x T4 30GB VRAM).
   - `mode="remote"` : Queries a live Kaggle FastAPI/ngrok VLM worker over HTTP.
   - `mode="hybrid"` : Uses remote worker if online, or pre-extracted VLM artifacts from
                       `Models/VLM/data/vlm_extracted_diagrams.json` while running live
@@ -43,8 +46,9 @@ VLM_ROOT = os.path.dirname(SCRIPT_DIR)
 MODELS_ROOT = os.path.dirname(VLM_ROOT)
 REPO_ROOT = os.path.dirname(MODELS_ROOT)
 
-DEFAULT_MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
-FALLBACK_MODEL_ID = "Qwen/Qwen2-VL-7B-Instruct"
+DEFAULT_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+FALLBACK_MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
+LEGACY_FALLBACK_MODEL_ID = "Qwen/Qwen2-VL-7B-Instruct"
 VLM_DATA_JSON = os.path.join(VLM_ROOT, "data", "vlm_extracted_diagrams.json")
 VLM_CKPT_DIR = os.path.join(VLM_ROOT, "checkpoints", "qwen_vl_7b")
 
@@ -53,6 +57,7 @@ VLM_SYSTEM_PROMPT = (
     "Inspect ONLY the provided technical slide/diagram image and its slide text context. "
     "Write questions and labels in the SAME language as the slide (French if the slide is in French, English if in English). "
     "CRITICAL: For `target_label`, copy the EXACT verbatim text printed inside the diagram (e.g. 'DBWn', 'Cache de tampons de la base de données', 'Assurer la sauvegarde') — NEVER translate printed diagram labels into another language! "
+    "For `bbox_2d`, always enclose the ENTIRE box, rectangle, oval, cloud, or container shape holding `target_label` (all wrapped text lines + outer border, not just one word). "
     "Return ONLY a valid JSON object with this exact schema:\n"
     "{\n"
     '  "is_educational_diagram": true,\n'
@@ -127,8 +132,18 @@ def extract_json_payload(raw_text: str) -> dict:
 class QwenVLDiagramEngine:
     """
     Multimodal VLM Slide & Diagram Comprehension Engine powered by
-    `Qwen/Qwen2.5-VL-7B-Instruct` / `Qwen/Qwen2-VL-7B-Instruct`.
+    `Qwen/Qwen3-VL-8B-Instruct` (with automatic fallback to
+    `Qwen/Qwen2.5-VL-7B-Instruct` and `Qwen/Qwen2-VL-7B-Instruct`).
     """
+
+    @staticmethod
+    def _short_name_for(model_id: str) -> str:
+        low = (model_id or "").lower()
+        if "qwen3" in low:
+            return "Qwen3-VL-8B"
+        if "2.5" in low or "2_5" in low:
+            return "Qwen2.5-VL-7B"
+        return "Qwen2-VL-7B"
 
     def __init__(
         self,
@@ -139,6 +154,7 @@ class QwenVLDiagramEngine:
         device: str = None,
     ):
         self.model_id = model_id
+        self.short_model_name = self._short_name_for(model_id)
         self.mode = mode.lower()
         self.load_in_4bit = load_in_4bit
         self.remote_url = (remote_url or os.environ.get("KAGGLE_VLM_URL", "")).rstrip("/")
@@ -165,75 +181,118 @@ class QwenVLDiagramEngine:
         self.diagrams_by_id = {d["diagram_id"]: d for d in self.diagrams_list}
         self.diagrams_by_concept = {int(d["concept_id"]): d for d in self.diagrams_list}
 
+    @staticmethod
+    def _resolve_model_class(source: str):
+        low = (source or "").lower()
+        if "qwen3" in low:
+            try:
+                from transformers import Qwen3VLForConditionalGeneration
+                return Qwen3VLForConditionalGeneration
+            except ImportError:
+                pass
+        if "2.5" in low or "2_5" in low:
+            try:
+                from transformers import Qwen2_5_VLForConditionalGeneration
+                return Qwen2_5_VLForConditionalGeneration
+            except ImportError:
+                pass
+        if "qwen2-vl" in low or "qwen2_vl" in low:
+            try:
+                from transformers import Qwen2VLForConditionalGeneration
+                return Qwen2VLForConditionalGeneration
+            except ImportError:
+                pass
+        try:
+            from transformers import AutoModelForImageTextToText
+            return AutoModelForImageTextToText
+        except ImportError:
+            from transformers import AutoModelForVision2Seq
+            return AutoModelForVision2Seq
+
     def load_live_vlm(self):
         """
-        Loads Qwen2.5-VL-7B-Instruct or Qwen2-VL-7B-Instruct onto GPU
-        (designed for Kaggle 2x T4 30GB VRAM with 4-bit NF4 or FP16).
+        Loads `Qwen/Qwen3-VL-8B-Instruct` onto GPU (designed for Kaggle 2x T4 30GB VRAM
+        in full FP16, or 4-bit NF4 if <24 GB VRAM), with automatic fallback to
+        `Qwen/Qwen2.5-VL-7B-Instruct` and `Qwen/Qwen2-VL-7B-Instruct`.
         """
         if self.vlm_model is not None:
             return
 
         from transformers import AutoProcessor, BitsAndBytesConfig
 
-        source = VLM_CKPT_DIR if os.path.exists(VLM_CKPT_DIR) else self.model_id
-
-        # On Kaggle 2x T4 (30 GB total VRAM), run Qwen2.5-VL-7B in FULL FP16 (no 4-bit loss)!
-        # Automatically fall back to 4-bit NF4 if total GPU VRAM < 24 GB.
         total_vram_gb = 0.0
         if torch.cuda.is_available():
             for i in range(torch.cuda.device_count()):
                 total_vram_gb += torch.cuda.get_device_properties(i).total_memory / (1024 ** 3)
-        use_4bit = bool(self.load_in_4bit) and (total_vram_gb < 24.0)
-        precision_tag = "4-bit NF4" if use_4bit else "FULL FP16 (Multi-GPU)"
-        print(f"[VLM] Loading {source} ({precision_tag}, total_vram={total_vram_gb:.1f}GB, device_map='auto')...", flush=True)
 
-        quant_config = None
-        if use_4bit and torch.cuda.is_available():
-            try:
-                quant_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
-                    bnb_4bit_use_double_quant=True,
-                    bnb_4bit_quant_type="nf4",
+        candidates = []
+        if os.path.exists(VLM_CKPT_DIR):
+            candidates.append(VLM_CKPT_DIR)
+        for mid in (self.model_id, FALLBACK_MODEL_ID, LEGACY_FALLBACK_MODEL_ID):
+            if mid and mid not in candidates:
+                candidates.append(mid)
+
+        last_err = None
+        for source in candidates:
+            # On Kaggle 2x T4 (>=24 GB VRAM), try FULL FP16 first, then 4-bit NF4 if OOM.
+            precision_plans = [False, True] if (total_vram_gb >= 24.0) else [bool(self.load_in_4bit)]
+            for try_4bit in precision_plans:
+                precision_tag = "4-bit NF4" if try_4bit else "FULL FP16 (Multi-GPU)"
+                print(
+                    f"[VLM] Loading {source} ({precision_tag}, total_vram={total_vram_gb:.1f}GB, device_map='auto')...",
+                    flush=True,
                 )
-            except Exception:
-                quant_config = None
+                try:
+                    quant_config = None
+                    if try_4bit and torch.cuda.is_available():
+                        try:
+                            quant_config = BitsAndBytesConfig(
+                                load_in_4bit=True,
+                                bnb_4bit_compute_dtype=torch.float16,
+                                bnb_4bit_use_double_quant=True,
+                                bnb_4bit_quant_type="nf4",
+                            )
+                        except Exception:
+                            quant_config = None
 
-        self.vlm_processor = AutoProcessor.from_pretrained(source)
+                    processor = AutoProcessor.from_pretrained(source)
+                    model_cls = self._resolve_model_class(source)
 
-        model_cls = None
-        if "Qwen2.5-VL" in source or "Qwen2_5_VL" in source:
-            try:
-                from transformers import Qwen2_5_VLForConditionalGeneration
-                model_cls = Qwen2_5_VLForConditionalGeneration
-            except ImportError:
-                pass
+                    load_kwargs = {
+                        "device_map": "auto" if torch.cuda.is_available() else None,
+                        "torch_dtype": torch.float16 if torch.cuda.is_available() else torch.float32,
+                    }
+                    if quant_config is not None:
+                        load_kwargs["quantization_config"] = quant_config
 
-        if model_cls is None:
-            try:
-                from transformers import Qwen2VLForConditionalGeneration
-                model_cls = Qwen2VLForConditionalGeneration
-            except ImportError:
-                from transformers import AutoModelForVision2Seq
-                model_cls = AutoModelForVision2Seq
+                    model = model_cls.from_pretrained(source, **load_kwargs).eval()
+                    self.vlm_processor = processor
+                    self.vlm_model = model
+                    self.model_id = source
+                    self.short_model_name = self._short_name_for(source)
+                    self.num_params = sum(p.numel() for p in self.vlm_model.parameters())
+                    print(
+                        f"[VLM] Loaded {self.short_model_name} ({source}, {precision_tag}, {self.num_params:,} params).",
+                        flush=True,
+                    )
+                    return
+                except Exception as exc:
+                    last_err = exc
+                    print(f"[VLM] Warning: Could not load {source} ({precision_tag}): {exc}", flush=True)
+                    if torch.cuda.is_available():
+                        try:
+                            torch.cuda.empty_cache()
+                        except Exception:
+                            pass
 
-        load_kwargs = {
-            "device_map": "auto" if torch.cuda.is_available() else None,
-            "torch_dtype": torch.float16 if torch.cuda.is_available() else torch.float32,
-        }
-        if quant_config is not None:
-            load_kwargs["quantization_config"] = quant_config
-
-        self.vlm_model = model_cls.from_pretrained(source, **load_kwargs).eval()
-        self.num_params = sum(p.numel() for p in self.vlm_model.parameters())
-        print(f"[VLM] Loaded {source} ({self.num_params:,} params).")
+        raise RuntimeError(f"Failed to load any live Qwen-VL model ({candidates}): {last_err}")
 
     @staticmethod
-    def _crop_letterbox_and_align28(img: Image.Image):
+    def _crop_letterbox_and_align28(img: Image.Image, stride: int = 28):
         """
-        Strips solid dark letterbox bars (RGB ~ 14, 22, 36) so Qwen2.5-VL sees ONLY
-        the active diagram at maximum resolution, and aligns it to exact multiples of 28
-        so the Qwen2.5-VL image processor performs ZERO internal rescaling (1.000x exact!).
+        Strips solid dark letterbox bars (RGB ~ 14, 22, 36) so Qwen-VL sees ONLY
+        the active diagram at maximum resolution, and aligns it to exact multiples of
+        `stride` (32px for Qwen3-VL, 28px for Qwen2.5-VL) for crisp zero-blur tiling.
         Returns `(aligned_img, (crop_x1, crop_y1, crop_w, crop_h))`.
         """
         import numpy as np
@@ -259,13 +318,15 @@ class QwenVLDiagramEngine:
             x1, y1, cw, ch = 0, 0, W, H
             cropped = rgb
 
-        # Scale up gently to ~672px max side and snap BOTH width & height to exact multiples of 28
-        scale = min(672.0 / max(1, cw), 504.0 / max(1, ch))
+        # Upscale crisp diagram to ~768x576 (Qwen3 stride=32) or ~672x504 (Qwen2.5 stride=28)
+        max_w = 768.0 if stride == 32 else 672.0
+        max_h = 576.0 if stride == 32 else 504.0
+        scale = min(max_w / max(1, cw), max_h / max(1, ch))
         scale = max(1.0, scale)
-        w28 = max(280, int(round((cw * scale) / 28.0)) * 28)
-        h28 = max(224, int(round((ch * scale) / 28.0)) * 28)
+        w_al = max(stride * 10, int(round((cw * scale) / float(stride))) * stride)
+        h_al = max(stride * 8, int(round((ch * scale) / float(stride))) * stride)
         aligned = cropped.resize(
-            (w28, h28),
+            (w_al, h_al),
             Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC,
         )
         return aligned, (x1, y1, cw, ch)
@@ -277,32 +338,40 @@ class QwenVLDiagramEngine:
         dino_prompt: str = "",
     ) -> list:
         """
-        Dedicated native `Qwen2.5-VL` visual grounding pass using the official
-        `[{"bbox_2d": [x1, y1, x2, y2], "label": "..."}]` cookbook format on the
-        letterbox-free, 28px-aligned diagram image (1.000x exact pixel grid!).
+        Dedicated native Qwen-VL visual grounding pass using the official
+        `[{"bbox_2d": [x1, y1, x2, y2], "label": "..."}]` format on the
+        letterbox-free diagram image.
+          - Qwen3-VL-8B: decodes `[0..1000]` normalized relative coordinates.
+          - Qwen2.5-VL-7B: decodes `image_grid_thw` absolute pixel coordinates.
         """
         self.load_live_vlm()
         width, height = img.size
-        is_qwen25 = "2.5" in (self.model_id or "") or "3-VL" in (self.model_id or "")
+        low_id = (self.model_id or "").lower()
+        is_qwen3 = "qwen3" in low_id
+        is_qwen25 = ("2.5" in low_id or "2_5" in low_id) and not is_qwen3
+        stride = 32 if is_qwen3 else 28
 
-        aligned_img, (cx1, cy1, cw, ch) = self._crop_letterbox_and_align28(img)
+        aligned_img, (cx1, cy1, cw, ch) = self._crop_letterbox_and_align28(img, stride=stride)
         aw, ah = aligned_img.size
 
-        # Lock processor pixel bounds so image_grid_thw matches (aw, ah) at 1.000x exact scale!
+        # Lock processor pixel bounds cleanly (32x32 for Qwen3-VL, 28x28 for Qwen2.5-VL)
         ip = getattr(self.vlm_processor, "image_processor", None)
         if ip is not None:
             px_area = aw * ah
+            unit = stride * stride
             if hasattr(ip, "min_pixels"):
-                ip.min_pixels = min(px_area, 256 * 28 * 28)
+                ip.min_pixels = min(px_area, 256 * unit)
             if hasattr(ip, "max_pixels"):
-                ip.max_pixels = max(px_area, 1024 * 28 * 28)
+                ip.max_pixels = max(px_area, 1024 * unit)
             if hasattr(ip, "size") and isinstance(ip.size, dict):
-                ip.size["shortest_edge"] = min(px_area, 256 * 28 * 28)
-                ip.size["longest_edge"] = max(px_area, 1024 * 28 * 28)
+                ip.size["shortest_edge"] = min(px_area, 256 * unit)
+                ip.size["longest_edge"] = max(px_area, 1024 * unit)
 
         ground_prompt = (
-            f'Locate "{target_label}" in this image and output its bounding box in JSON format: '
-            f'[{{"bbox_2d": [x1, y1, x2, y2], "label": "{target_label}"}}]'
+            f'Locate the ENTIRE enclosing box, rectangle, oval, cloud, or container shape '
+            f'that holds "{target_label}" (include all wrapped lines of text inside it and '
+            f'its full outer border, NOT just a single word). '
+            f'Output ONLY JSON: [{{"bbox_2d": [x1, y1, x2, y2], "label": "{target_label}"}}]'
         )
         messages = [
             {
@@ -321,14 +390,17 @@ class QwenVLDiagramEngine:
             images=[aligned_img],
             padding=True,
             return_tensors="pt",
-        ).to(self.vlm_model.device)
+        )
+        inputs.pop("token_type_ids", None)
+        inputs = inputs.to(self.vlm_model.device)
 
         model_w, model_h = float(aw), float(ah)
         if "image_grid_thw" in inputs and inputs["image_grid_thw"] is not None:
             thw = inputs["image_grid_thw"][0].detach().cpu().tolist()
             if len(thw) == 3:
-                model_h = float(thw[1]) * 14.0
-                model_w = float(thw[2]) * 14.0
+                patch_px = 16.0 if is_qwen3 else 14.0
+                model_h = float(thw[1]) * patch_px
+                model_w = float(thw[2]) * patch_px
 
         with torch.no_grad():
             gen_ids = self.vlm_model.generate(
@@ -336,14 +408,16 @@ class QwenVLDiagramEngine:
                 max_new_tokens=96,
                 do_sample=False,
             )
-        trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, gen_ids)]
+        trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], gen_ids)]
         raw = self.vlm_processor.batch_decode(
             trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )[0]
 
         box = None
-        # Parse both `[{"bbox_2d": [...]}]` list format and `{"bbox_2d": [...]}` dict format
-        m_arr = re.search(r'"bbox_2d"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]', raw)
+        m_arr = re.search(
+            r'"bbox_2d"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]',
+            raw,
+        )
         if m_arr:
             box = [float(m_arr.group(i)) for i in range(1, 5)]
         else:
@@ -360,13 +434,23 @@ class QwenVLDiagramEngine:
         if y2 < y1:
             y1, y2 = y2, y1
 
-        # Map from aligned image pixel grid -> cropped diagram -> 720x420 canvas!
-        if is_qwen25 and max(x1, x2) <= model_w * 1.05 and max(y1, y2) <= model_h * 1.05:
+        # CRITICAL coordinate convention split:
+        #   - Qwen3-VL ALWAYS outputs normalized [0..1000] relative coordinates!
+        #   - Qwen2.5-VL outputs absolute pixels on its (model_w x model_h) grid.
+        if is_qwen3:
+            coord_mode = "0..1000"
+            rel_x1 = x1 / 1000.0
+            rel_y1 = y1 / 1000.0
+            rel_x2 = x2 / 1000.0
+            rel_y2 = y2 / 1000.0
+        elif is_qwen25 and max(x1, x2) <= model_w * 1.05 and max(y1, y2) <= model_h * 1.05:
+            coord_mode = f"abs:{int(model_w)}x{int(model_h)}"
             rel_x1 = x1 / max(1.0, model_w)
             rel_y1 = y1 / max(1.0, model_h)
             rel_x2 = x2 / max(1.0, model_w)
             rel_y2 = y2 / max(1.0, model_h)
         else:
+            coord_mode = "0..1000-fb"
             rel_x1 = x1 / 1000.0
             rel_y1 = y1 / 1000.0
             rel_x2 = x2 / 1000.0
@@ -393,7 +477,7 @@ class QwenVLDiagramEngine:
             round(min(float(height - 2), cy + 0.5 * bh), 1),
         ]
         print(
-            f"  [Qwen2.5-VL GROUND] '{target_label}' | crop=({cx1},{cy1},{cw}x{ch}) | aligned={aw}x{ah} | grid={int(model_w)}x{int(model_h)} | raw={box} -> canvas={final_box}",
+            f"  [{self.short_model_name} GROUND] '{target_label}' | mode={coord_mode} | crop=({cx1},{cy1},{cw}x{ch}) | aligned={aw}x{ah} | raw={box} -> canvas={final_box}",
             flush=True,
         )
         return final_box
@@ -417,20 +501,26 @@ class QwenVLDiagramEngine:
         img = Image.open(abs_path).convert("RGB")
         width, height = img.size
 
-        # Feed letterbox-free diagram to Qwen2.5-VL for sharpest text & diagram comprehension!
-        aligned_img, (cx1, cy1, cw, ch) = self._crop_letterbox_and_align28(img)
+        low_id = (self.model_id or "").lower()
+        is_qwen3 = "qwen3" in low_id
+        is_qwen25 = ("2.5" in low_id or "2_5" in low_id) and not is_qwen3
+        stride = 32 if is_qwen3 else 28
+
+        # Feed letterbox-free diagram to Qwen-VL for sharpest text & diagram comprehension!
+        aligned_img, (cx1, cy1, cw, ch) = self._crop_letterbox_and_align28(img, stride=stride)
         aw, ah = aligned_img.size
 
         ip = getattr(self.vlm_processor, "image_processor", None)
         if ip is not None:
             px_area = aw * ah
+            unit = stride * stride
             if hasattr(ip, "min_pixels"):
-                ip.min_pixels = min(px_area, 256 * 28 * 28)
+                ip.min_pixels = min(px_area, 256 * unit)
             if hasattr(ip, "max_pixels"):
-                ip.max_pixels = max(px_area, 1024 * 28 * 28)
+                ip.max_pixels = max(px_area, 1024 * unit)
             if hasattr(ip, "size") and isinstance(ip.size, dict):
-                ip.size["shortest_edge"] = min(px_area, 256 * 28 * 28)
-                ip.size["longest_edge"] = max(px_area, 1024 * 28 * 28)
+                ip.size["shortest_edge"] = min(px_area, 256 * unit)
+                ip.size["longest_edge"] = max(px_area, 1024 * unit)
 
         ctx_snippet = (slide_context or "").strip()[:800]
         ctx_block = f"\nSlide / Page Text Context:\n\"\"\"\n{ctx_snippet}\n\"\"\"\n" if ctx_snippet else ""
@@ -465,7 +555,9 @@ class QwenVLDiagramEngine:
             images=[aligned_img],
             padding=True,
             return_tensors="pt",
-        ).to(self.vlm_model.device)
+        )
+        inputs.pop("token_type_ids", None)
+        inputs = inputs.to(self.vlm_model.device)
 
         with torch.no_grad():
             generated_ids = self.vlm_model.generate(
@@ -475,7 +567,7 @@ class QwenVLDiagramEngine:
             )
 
         trimmed_ids = [
-            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
         ]
         raw_output = self.vlm_processor.batch_decode(
             trimmed_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
@@ -508,9 +600,9 @@ class QwenVLDiagramEngine:
         if "image_grid_thw" in inputs and inputs["image_grid_thw"] is not None:
             thw1 = inputs["image_grid_thw"][0].detach().cpu().tolist()
             if len(thw1) == 3:
-                pass1_model_h = float(thw1[1]) * 14.0
-                pass1_model_w = float(thw1[2]) * 14.0
-        is_qwen25 = "2.5" in (self.model_id or "") or "3-VL" in (self.model_id or "")
+                patch_px = 16.0 if is_qwen3 else 14.0
+                pass1_model_h = float(thw1[1]) * patch_px
+                pass1_model_w = float(thw1[2]) * patch_px
 
         live_comps = parsed.get("components", [])
         if not isinstance(live_comps, list):
@@ -535,14 +627,14 @@ class QwenVLDiagramEngine:
             )
 
             px_box = None
-            grounding_tier = "Qwen2.5-VL-FP16"
+            grounding_tier = f"{self.short_model_name}-FP16"
 
-            # Dedicated native Qwen2.5-VL `bbox_2d` grounding pass on letterbox-free 1:1 image!
+            # Dedicated native Qwen-VL `bbox_2d` grounding pass on letterbox-free diagram!
             if not use_reference_cache:
                 try:
                     px_box = self.ground_component_bbox_live(img, target_label=str(t_label), dino_prompt=str(d_prompt))
                 except Exception as g_exc:
-                    print(f"  [Qwen2.5-VL GROUND] Fallback on '{t_label}': {g_exc}", flush=True)
+                    print(f"  [{self.short_model_name} GROUND] Fallback on '{t_label}': {g_exc}", flush=True)
 
             if px_box is None:
                 raw_b = lc.get("bbox_2d") or lc.get("vlm_box_1000")
@@ -553,12 +645,21 @@ class QwenVLDiagramEngine:
                             bx1, bx2 = bx2, bx1
                         if by2 < by1:
                             by1, by2 = by2, by1
-                        if not use_reference_cache and is_qwen25 and max(bx1, bx2) <= pass1_model_w * 1.05 and max(by1, by2) <= pass1_model_h * 1.05:
+                        if not use_reference_cache:
+                            if is_qwen3:
+                                rx1, ry1, rx2, ry2 = bx1 / 1000.0, by1 / 1000.0, bx2 / 1000.0, by2 / 1000.0
+                            elif is_qwen25 and max(bx1, bx2) <= pass1_model_w * 1.05 and max(by1, by2) <= pass1_model_h * 1.05:
+                                rx1 = bx1 / max(1.0, pass1_model_w)
+                                ry1 = by1 / max(1.0, pass1_model_h)
+                                rx2 = bx2 / max(1.0, pass1_model_w)
+                                ry2 = by2 / max(1.0, pass1_model_h)
+                            else:
+                                rx1, ry1, rx2, ry2 = bx1 / 1000.0, by1 / 1000.0, bx2 / 1000.0, by2 / 1000.0
                             px_box = [
-                                round(max(2.0, cx1 + (bx1 / max(1.0, pass1_model_w)) * cw), 1),
-                                round(max(2.0, cy1 + (by1 / max(1.0, pass1_model_h)) * ch), 1),
-                                round(min(float(width - 2), cx1 + (bx2 / max(1.0, pass1_model_w)) * cw), 1),
-                                round(min(float(height - 2), cy1 + (by2 / max(1.0, pass1_model_h)) * ch), 1),
+                                round(max(2.0, cx1 + rx1 * cw), 1),
+                                round(max(2.0, cy1 + ry1 * ch), 1),
+                                round(min(float(width - 2), cx1 + rx2 * cw), 1),
+                                round(min(float(height - 2), cy1 + ry2 * ch), 1),
                             ]
                         else:
                             px_box = box_1000_to_pixel([bx1, by1, bx2, by2], width, height)

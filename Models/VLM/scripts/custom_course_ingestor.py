@@ -628,16 +628,7 @@ def ingest_custom_course_package(
         f"Found {doc_info['total_unique_found']} unique diagrams across {doc_info['total_pages']} pages (skipped logos). Inspecting with Qwen2.5-VL-7B...",
     )
 
-    # Lazy-init Tier-1 EasyOCR CRAFT+CRNN Pixel-Exact Region Grounder (French + English)
-    global _OCR_GROUNDER
-    if "_OCR_GROUNDER" not in globals() or _OCR_GROUNDER is None:
-        try:
-            from ocr_region_grounder import OCRRegionGrounder
-            _OCR_GROUNDER = OCRRegionGrounder(languages=["fr", "en"])
-        except Exception:
-            _OCR_GROUNDER = None
-
-    # Run Tier-1 EasyOCR + live Qwen2.5-VL-7B inspection on candidate diagrams, automatically
+    # Run live Qwen2.5-VL-7B (FP16) inspection on candidate diagrams, automatically
     # skipping any decorative image where Qwen2.5-VL-7B says `is_educational_diagram: false`!
     accepted_slots = []
     cand_cursor = 0
@@ -648,17 +639,8 @@ def ingest_custom_course_package(
         slot_idx = len(accepted_slots)
         _report(
             20 + slot_idx * 14,
-            f"EasyOCR + Qwen2.5-VL-7B inspecting Page {cand['page']} diagram ({slot_idx + 1}/5): {cand['slide_title'][:34]}...",
+            f"Qwen2.5-VL-7B (FP16) inspecting Page {cand['page']} diagram ({slot_idx + 1}/5): {cand['slide_title'][:34]}...",
         )
-
-        ocr_regs = []
-        if _OCR_GROUNDER is not None and _OCR_GROUNDER.available:
-            ocr_regs = _OCR_GROUNDER.extract_regions(cand["abs_path"])
-            print(
-                f"  [TIER-1 OCR] Page {cand['page']} -> Detected {len(ocr_regs)} exact diagram regions: "
-                f"{[r['label'][:28] for r in ocr_regs[:6]]}",
-                flush=True,
-            )
 
         vlm_res = None
         if vlm_is_live:
@@ -672,7 +654,6 @@ def ingest_custom_course_package(
                     concept_id=slot_idx,
                     concept_title=f"{course_title} — {cand['slide_title']}",
                     slide_context=cand["slide_text"],
-                    ocr_regions=ocr_regs,
                     use_reference_cache=False,  # CRITICAL: NEVER mix old YOLO/OCR cache!
                 )
                 # If Qwen2.5-VL-7B flags this as a logo/non-educational image and more candidates remain, skip it!
@@ -682,7 +663,7 @@ def ingest_custom_course_package(
             except Exception as e:
                 print(f"  [Qwen2.5-VL-7B LIVE] Error on Page {cand['page']}: {e}", flush=True)
 
-        accepted_slots.append({"cand": cand, "vlm": vlm_res, "ocr_regs": ocr_regs})
+        accepted_slots.append({"cand": cand, "vlm": vlm_res})
 
     # If the uploaded document had fewer than 5 unique diagrams, build distinct text-based schematics
     # for the remaining slots using spread-out text pages from the document (never duplicating photos!)
@@ -795,12 +776,11 @@ def ingest_custom_course_package(
                 d_prompt = d_prompt.strip() + "."
 
             vlm_box_px = [float(v) for v in comp.get("vlm_box_px", [60.0, 80.0, 340.0, 340.0])]
-            grounding_tier = comp.get("grounding_tier", "fallback")
+            grounding_tier = comp.get("grounding_tier", "Qwen2.5-VL-FP16")
             refined_box = vlm_box_px
 
-            # Preserve pixel-exact Tier-1 EasyOCR boxes untouched; only use Grounding-DINO-Base/Tiny
-            # to refine unlabeled visual regions where OCR did not lock onto text!
-            if grounding_tier != "Tier1-EasyOCR-CRAFT" and dino_evaluator is not None and os.path.exists(abs_diag):
+            # Refine with Grounding-DINO-Base/Tiny only when high-IoU consensus confirms the VLM box
+            if dino_evaluator is not None and os.path.exists(abs_diag):
                 try:
                     pil_im = Image.open(abs_diag).convert("RGB")
                     inputs = dino_evaluator.processor(

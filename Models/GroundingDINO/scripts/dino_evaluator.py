@@ -188,12 +188,9 @@ class GroundingDINODiagramEvaluator:
             best_raw_box = target_box
             best_raw_score = 0.35
 
-        # Preserve Tier-1 pixel-exact EasyOCR boxes untouched; blend Grounding DINO for fallback boxes
+        # Calibrated dual-vision target box (blends Grounding DINO proposal when high-IoU with Qwen2.5-VL box)
         raw_iou = compute_iou(best_raw_box, target_box)
-        if p.get("grounding_tier") == "Tier1-EasyOCR-CRAFT":
-            grounded_box = [round(float(v), 1) for v in target_box]
-            best_raw_score = max(best_raw_score, 0.94)
-        elif raw_iou >= 0.55:
+        if raw_iou >= 0.55:
             grounded_box = [
                 round(0.30 * best_raw_box[i] + 0.70 * target_box[i], 1)
                 for i in range(4)
@@ -326,9 +323,5 @@ class GroundingDINODiagramEvaluator:
             "dino_latency_ms": g["dino_latency_ms"],
             "feedback": feedback,
             "explanation": p["explanation"],
-            "graded_by": (
-                f"EasyOCR-CRAFT + {getattr(self, 'model_display_name', 'Grounding-DINO')} ({self.device.type.upper()})"
-                if p.get("grounding_tier") == "Tier1-EasyOCR-CRAFT"
-                else f"{getattr(self, 'model_display_name', 'Grounding-DINO-Tiny')} ({self.device.type.upper()})"
-            ),
+            "graded_by": f"Qwen2.5-VL + {getattr(self, 'model_display_name', 'Grounding-DINO-Tiny')} ({self.device.type.upper()})",
         }

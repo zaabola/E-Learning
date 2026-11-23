@@ -52,18 +52,19 @@ VLM_SYSTEM_PROMPT = (
     "You are an expert University Professor and Multimodal Curriculum Architect. "
     "Inspect ONLY the provided technical slide/diagram image and its slide text context. "
     "Write questions and labels in the SAME language as the slide (French if the slide is in French, English if in English). "
+    "CRITICAL: For `target_label`, copy the EXACT verbatim text printed inside the diagram (e.g. 'DBWn', 'Cache de tampons de la base de données', 'Assurer la sauvegarde') — NEVER translate printed diagram labels into another language! "
     "Return ONLY a valid JSON object with this exact schema:\n"
     "{\n"
     '  "is_educational_diagram": true,\n'
     '  "concept_title": "Short exact academic concept title from this diagram",\n'
     '  "visual_summary": "2-sentence technical explanation of what this specific diagram shows",\n'
-    '  "extracted_labels": ["label 1 visible in image", "label 2 visible in image", "label 3"],\n'
+    '  "extracted_labels": ["verbatim label 1 visible in image", "verbatim label 2 visible in image", "verbatim label 3"],\n'
     '  "summary_bullets": ["Key fact 1 from diagram/slide", "Key fact 2", "Key fact 3"],\n'
     '  "components": [\n'
     "    {\n"
-    '      "target_label": "Exact named component visible in THIS image",\n'
+    '      "target_label": "EXACT verbatim text label printed inside THIS image",\n'
     '      "dino_prompt": "short visual description of this component box in English ending with a period.",\n'
-    '      "vlm_box_1000": [x1_0_to_1000, y1_0_to_1000, x2_0_to_1000, y2_0_to_1000],\n'
+    '      "bbox_2d": [x1, y1, x2, y2],\n'
     '      "lab_question": "Click or drag a box around [target_label] shown in this figure.",\n'
     '      "socratic_hint": "1-sentence visual hint pointing to where it is on the figure",\n'
     '      "explanation": "1-sentence explanation of what this component does"\n'
@@ -227,6 +228,48 @@ class QwenVLDiagramEngine:
         self.num_params = sum(p.numel() for p in self.vlm_model.parameters())
         print(f"[VLM] Loaded {source} ({self.num_params:,} params).")
 
+    @staticmethod
+    def _crop_letterbox_and_align28(img: Image.Image):
+        """
+        Strips solid dark letterbox bars (RGB ~ 14, 22, 36) so Qwen2.5-VL sees ONLY
+        the active diagram at maximum resolution, and aligns it to exact multiples of 28
+        so the Qwen2.5-VL image processor performs ZERO internal rescaling (1.000x exact!).
+        Returns `(aligned_img, (crop_x1, crop_y1, crop_w, crop_h))`.
+        """
+        import numpy as np
+
+        rgb = img.convert("RGB")
+        W, H = rgb.size
+        arr = np.asarray(rgb, dtype=np.int16)
+        bg = np.array([14, 22, 36], dtype=np.int16)
+        mask = np.abs(arr - bg).sum(axis=2) > 18
+        ys, xs = np.where(mask)
+        if len(xs) > 400 and len(ys) > 400:
+            x1 = max(0, int(xs.min()) - 2)
+            y1 = max(0, int(ys.min()) - 2)
+            x2 = min(W, int(xs.max()) + 3)
+            y2 = min(H, int(ys.max()) + 3)
+            if (x2 - x1) >= 80 and (y2 - y1) >= 80:
+                cropped = rgb.crop((x1, y1, x2, y2))
+                cw, ch = x2 - x1, y2 - y1
+            else:
+                x1, y1, cw, ch = 0, 0, W, H
+                cropped = rgb
+        else:
+            x1, y1, cw, ch = 0, 0, W, H
+            cropped = rgb
+
+        # Scale up gently to ~672px max side and snap BOTH width & height to exact multiples of 28
+        scale = min(672.0 / max(1, cw), 504.0 / max(1, ch))
+        scale = max(1.0, scale)
+        w28 = max(280, int(round((cw * scale) / 28.0)) * 28)
+        h28 = max(224, int(round((ch * scale) / 28.0)) * 28)
+        aligned = cropped.resize(
+            (w28, h28),
+            Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC,
+        )
+        return aligned, (x1, y1, cw, ch)
+
     def ground_component_bbox_live(
         self,
         img: Image.Image,
@@ -234,23 +277,38 @@ class QwenVLDiagramEngine:
         dino_prompt: str = "",
     ) -> list:
         """
-        Dedicated fast 48-token native `Qwen2.5-VL` visual grounding pass.
-        Qwen2.5-VL outputs `bbox_2d: [x1, y1, x2, y2]` in the exact `image_grid_thw`
-        pixel grid `(grid_w * 14, grid_h * 14)` — NOT normalized [0..1000]!
+        Dedicated native `Qwen2.5-VL` visual grounding pass using the official
+        `[{"bbox_2d": [x1, y1, x2, y2], "label": "..."}]` cookbook format on the
+        letterbox-free, 28px-aligned diagram image (1.000x exact pixel grid!).
         """
         self.load_live_vlm()
         width, height = img.size
         is_qwen25 = "2.5" in (self.model_id or "") or "3-VL" in (self.model_id or "")
 
+        aligned_img, (cx1, cy1, cw, ch) = self._crop_letterbox_and_align28(img)
+        aw, ah = aligned_img.size
+
+        # Lock processor pixel bounds so image_grid_thw matches (aw, ah) at 1.000x exact scale!
+        ip = getattr(self.vlm_processor, "image_processor", None)
+        if ip is not None:
+            px_area = aw * ah
+            if hasattr(ip, "min_pixels"):
+                ip.min_pixels = min(px_area, 256 * 28 * 28)
+            if hasattr(ip, "max_pixels"):
+                ip.max_pixels = max(px_area, 1024 * 28 * 28)
+            if hasattr(ip, "size") and isinstance(ip.size, dict):
+                ip.size["shortest_edge"] = min(px_area, 256 * 28 * 28)
+                ip.size["longest_edge"] = max(px_area, 1024 * 28 * 28)
+
         ground_prompt = (
-            f'Locate the exact visual component labeled "{target_label}" in this diagram. '
-            'Output ONLY a JSON object with pixel coordinates: {"bbox_2d": [x1, y1, x2, y2]}'
+            f'Locate "{target_label}" in this image and output its bounding box in JSON format: '
+            f'[{{"bbox_2d": [x1, y1, x2, y2], "label": "{target_label}"}}]'
         )
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "image", "image": img},
+                    {"type": "image", "image": aligned_img},
                     {"type": "text", "text": ground_prompt},
                 ],
             }
@@ -260,13 +318,12 @@ class QwenVLDiagramEngine:
         )
         inputs = self.vlm_processor(
             text=[text_input],
-            images=[img],
+            images=[aligned_img],
             padding=True,
             return_tensors="pt",
         ).to(self.vlm_model.device)
 
-        # Read exact Qwen2.5-VL vision encoder resized pixel grid from image_grid_thw (patch_size = 14)
-        model_w, model_h = float(width), float(height)
+        model_w, model_h = float(aw), float(ah)
         if "image_grid_thw" in inputs and inputs["image_grid_thw"] is not None:
             thw = inputs["image_grid_thw"][0].detach().cpu().tolist()
             if len(thw) == 3:
@@ -276,7 +333,7 @@ class QwenVLDiagramEngine:
         with torch.no_grad():
             gen_ids = self.vlm_model.generate(
                 **inputs,
-                max_new_tokens=64,
+                max_new_tokens=96,
                 do_sample=False,
             )
         trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, gen_ids)]
@@ -285,12 +342,11 @@ class QwenVLDiagramEngine:
         )[0]
 
         box = None
-        try:
-            obj = extract_json_payload(raw)
-            cand = obj.get("bbox_2d") or obj.get("bbox") or obj.get("box")
-            if isinstance(cand, list) and len(cand) == 4:
-                box = [float(v) for v in cand]
-        except Exception:
+        # Parse both `[{"bbox_2d": [...]}]` list format and `{"bbox_2d": [...]}` dict format
+        m_arr = re.search(r'"bbox_2d"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]', raw)
+        if m_arr:
+            box = [float(m_arr.group(i)) for i in range(1, 5)]
+        else:
             nums = re.findall(r"-?\d+(?:\.\d+)?", raw)
             if len(nums) >= 4:
                 box = [float(v) for v in nums[:4]]
@@ -304,20 +360,23 @@ class QwenVLDiagramEngine:
         if y2 < y1:
             y1, y2 = y2, y1
 
-        # Map from Qwen2.5-VL absolute model pixel grid -> image canvas pixel coordinates
+        # Map from aligned image pixel grid -> cropped diagram -> 720x420 canvas!
         if is_qwen25 and max(x1, x2) <= model_w * 1.05 and max(y1, y2) <= model_h * 1.05:
-            px1 = x1 * (width / max(1.0, model_w))
-            py1 = y1 * (height / max(1.0, model_h))
-            px2 = x2 * (width / max(1.0, model_w))
-            py2 = y2 * (height / max(1.0, model_h))
+            rel_x1 = x1 / max(1.0, model_w)
+            rel_y1 = y1 / max(1.0, model_h)
+            rel_x2 = x2 / max(1.0, model_w)
+            rel_y2 = y2 / max(1.0, model_h)
         else:
-            # Fallback for normalized [0..1000] scale (Qwen2-VL)
-            px1 = (x1 / 1000.0) * width
-            py1 = (y1 / 1000.0) * height
-            px2 = (x2 / 1000.0) * width
-            py2 = (y2 / 1000.0) * height
+            rel_x1 = x1 / 1000.0
+            rel_y1 = y1 / 1000.0
+            rel_x2 = x2 / 1000.0
+            rel_y2 = y2 / 1000.0
 
-        # Clamp to canvas and apply comfortable minimum clickable size around the EXACT detected center
+        px1 = cx1 + rel_x1 * cw
+        py1 = cy1 + rel_y1 * ch
+        px2 = cx1 + rel_x2 * cw
+        py2 = cy1 + rel_y2 * ch
+
         px1 = max(2.0, min(float(width - 2), px1))
         py1 = max(2.0, min(float(height - 2), py1))
         px2 = max(2.0, min(float(width - 2), px2))
@@ -334,7 +393,7 @@ class QwenVLDiagramEngine:
             round(min(float(height - 2), cy + 0.5 * bh), 1),
         ]
         print(
-            f"  [Qwen2.5-VL GROUND] '{target_label}' | raw={box} | grid={int(model_w)}x{int(model_h)} -> canvas={final_box}",
+            f"  [Qwen2.5-VL GROUND] '{target_label}' | crop=({cx1},{cy1},{cw}x{ch}) | aligned={aw}x{ah} | grid={int(model_w)}x{int(model_h)} | raw={box} -> canvas={final_box}",
             flush=True,
         )
         return final_box
@@ -345,41 +404,43 @@ class QwenVLDiagramEngine:
         concept_id: int = 0,
         concept_title: str = "",
         slide_context: str = "",
-        ocr_regions: list = None,
         max_new_tokens: int = 1050,
         use_reference_cache: bool = False,
     ) -> dict:
         """
         Runs live Qwen-VL inference on an input course diagram image and returns
         the structured pedagogical + spatial JSON payload strictly grounded in
-        that specific image, its OCR-detected regions, and its slide context.
+        that specific image and its slide context.
         """
         self.load_live_vlm()
         abs_path = image_path if os.path.isabs(image_path) else os.path.join(REPO_ROOT, image_path)
         img = Image.open(abs_path).convert("RGB")
         width, height = img.size
 
+        # Feed letterbox-free diagram to Qwen2.5-VL for sharpest text & diagram comprehension!
+        aligned_img, (cx1, cy1, cw, ch) = self._crop_letterbox_and_align28(img)
+        aw, ah = aligned_img.size
+
+        ip = getattr(self.vlm_processor, "image_processor", None)
+        if ip is not None:
+            px_area = aw * ah
+            if hasattr(ip, "min_pixels"):
+                ip.min_pixels = min(px_area, 256 * 28 * 28)
+            if hasattr(ip, "max_pixels"):
+                ip.max_pixels = max(px_area, 1024 * 28 * 28)
+            if hasattr(ip, "size") and isinstance(ip.size, dict):
+                ip.size["shortest_edge"] = min(px_area, 256 * 28 * 28)
+                ip.size["longest_edge"] = max(px_area, 1024 * 28 * 28)
+
         ctx_snippet = (slide_context or "").strip()[:800]
         ctx_block = f"\nSlide / Page Text Context:\n\"\"\"\n{ctx_snippet}\n\"\"\"\n" if ctx_snippet else ""
 
-        ocr_regions = ocr_regions or []
-        ocr_block = ""
-        if ocr_regions:
-            lines_ocr = [f"  [{r['region_id']}] \"{r['label'][:85]}\"" for r in ocr_regions[:18]]
-            ocr_block = (
-                "\nOCR-Detected Printed Regions INSIDE THIS EXACT IMAGE:\n"
-                + "\n".join(lines_ocr)
-                + "\nIMPORTANT: For each of the 2 components in `components`, pick its EXACT `region_id` (integer) "
-                  "from the OCR list above and use that exact printed label as `target_label` (do NOT translate or invent labels not printed on the diagram!).\n"
-            )
-
         user_prompt = (
-            f"Course Topic Hint: '{concept_title}'.\n"
-            f"Image resolution: {width}x{height} pixels."
-            f"{ctx_block}{ocr_block}\n"
+            f"Course Topic Hint: '{concept_title}'."
+            f"{ctx_block}\n"
             "1. First decide if this image is a meaningful technical/educational diagram, schema, chart, or table (`is_educational_diagram`: true) "
             "or just a decorative school logo / cover icon / stock photo (`is_educational_diagram`: false).\n"
-            "2. Select 2 distinct, pedagogically important components INSIDE THIS EXACT IMAGE (include `region_id` from the OCR list if provided).\n"
+            "2. Select 2 distinct, clearly labeled visual components INSIDE THIS EXACT IMAGE. Copy their EXACT verbatim text labels printed on the image (do NOT translate French labels into English!).\n"
             "3. Generate 2 specific multiple-choice questions (`mc_questions`) and 1 analytical Visual Question Answering (`vqa_challenge`) strictly about THIS image and slide text. "
             "Do NOT invent unrelated topics. Return strict JSON."
         )
@@ -389,7 +450,7 @@ class QwenVLDiagramEngine:
             {
                 "role": "user",
                 "content": [
-                    {"type": "image", "image": img},
+                    {"type": "image", "image": aligned_img},
                     {"type": "text", "text": user_prompt},
                 ],
             },
@@ -401,7 +462,7 @@ class QwenVLDiagramEngine:
         )
         inputs = self.vlm_processor(
             text=[text_input],
-            images=[img],
+            images=[aligned_img],
             padding=True,
             return_tensors="pt",
         ).to(self.vlm_model.device)
@@ -443,8 +504,7 @@ class QwenVLDiagramEngine:
             parsed["extracted_labels"] = ref_diag.get("extracted_labels", [parsed["concept_title"]])
 
         ref_comps = ref_diag.get("components", []) if use_reference_cache else []
-        # Read exact Qwen2.5-VL resized pixel grid from Pass 1 inputs
-        pass1_model_w, pass1_model_h = float(width), float(height)
+        pass1_model_w, pass1_model_h = float(aw), float(ah)
         if "image_grid_thw" in inputs and inputs["image_grid_thw"] is not None:
             thw1 = inputs["image_grid_thw"][0].detach().cpu().tolist()
             if len(thw1) == 3:
@@ -458,9 +518,6 @@ class QwenVLDiagramEngine:
 
         default_boxes = [[80, 160, 440, 820], [540, 160, 920, 820]]
         normalized_comps = []
-        used_ocr_ids = set()
-
-        from ocr_region_grounder import OCRRegionGrounder
 
         for idx in range(2):
             rc = ref_comps[idx] if idx < len(ref_comps) else {}
@@ -478,41 +535,12 @@ class QwenVLDiagramEngine:
             )
 
             px_box = None
-            grounding_tier = "fallback"
+            grounding_tier = "Qwen2.5-VL-FP16"
 
-            # TIER 1 (PRIMARY): Pixel-exact EasyOCR CRAFT+CRNN region match (0 px drift!)
-            if not use_reference_cache and ocr_regions:
-                matched_reg = None
-                req_rid = lc.get("region_id", None)
-                if req_rid is not None:
-                    try:
-                        rid_int = int(req_rid)
-                        if 0 <= rid_int < len(ocr_regions) and rid_int not in used_ocr_ids:
-                            matched_reg = ocr_regions[rid_int]
-                    except Exception:
-                        matched_reg = None
-
-                if matched_reg is None:
-                    avail_regs = [r for r in ocr_regions if r["region_id"] not in used_ocr_ids]
-                    matched_reg = OCRRegionGrounder.match_label_to_region(avail_regs, str(t_label))
-
-                if matched_reg is not None:
-                    used_ocr_ids.add(matched_reg["region_id"])
-                    px_box = [float(v) for v in matched_reg["box"]]
-                    # Keep the exact printed diagram label so the student knows exactly what to click!
-                    t_label = matched_reg["label"]
-                    grounding_tier = "Tier1-EasyOCR-CRAFT"
-                    print(
-                        f"  [TIER-1 OCR LOCK] Region[{matched_reg['region_id']}] '{t_label[:48]}' -> pixel_box={px_box}",
-                        flush=True,
-                    )
-
-            # TIER 2 (FALLBACK): Dedicated native Qwen2.5-VL `bbox_2d` grounding pass
-            if px_box is None and not use_reference_cache:
+            # Dedicated native Qwen2.5-VL `bbox_2d` grounding pass on letterbox-free 1:1 image!
+            if not use_reference_cache:
                 try:
                     px_box = self.ground_component_bbox_live(img, target_label=str(t_label), dino_prompt=str(d_prompt))
-                    if px_box is not None:
-                        grounding_tier = "Tier2-Qwen2.5-VL-bbox2d"
                 except Exception as g_exc:
                     print(f"  [Qwen2.5-VL GROUND] Fallback on '{t_label}': {g_exc}", flush=True)
 
@@ -527,10 +555,10 @@ class QwenVLDiagramEngine:
                             by1, by2 = by2, by1
                         if not use_reference_cache and is_qwen25 and max(bx1, bx2) <= pass1_model_w * 1.05 and max(by1, by2) <= pass1_model_h * 1.05:
                             px_box = [
-                                round(max(2.0, bx1 * (width / max(1.0, pass1_model_w))), 1),
-                                round(max(2.0, by1 * (height / max(1.0, pass1_model_h))), 1),
-                                round(min(float(width - 2), bx2 * (width / max(1.0, pass1_model_w))), 1),
-                                round(min(float(height - 2), by2 * (height / max(1.0, pass1_model_h))), 1),
+                                round(max(2.0, cx1 + (bx1 / max(1.0, pass1_model_w)) * cw), 1),
+                                round(max(2.0, cy1 + (by1 / max(1.0, pass1_model_h)) * ch), 1),
+                                round(min(float(width - 2), cx1 + (bx2 / max(1.0, pass1_model_w)) * cw), 1),
+                                round(min(float(height - 2), cy1 + (by2 / max(1.0, pass1_model_h)) * ch), 1),
                             ]
                         else:
                             px_box = box_1000_to_pixel([bx1, by1, bx2, by2], width, height)
@@ -541,7 +569,6 @@ class QwenVLDiagramEngine:
                 fallback_b1000 = rc.get("vlm_box_1000", default_boxes[idx])
                 px_box = box_1000_to_pixel(fallback_b1000, width, height)
             else:
-                # Pad small components gently around their EXACT center rather than discarding them!
                 cx = 0.5 * (px_box[0] + px_box[2])
                 cy = 0.5 * (px_box[1] + px_box[3])
                 bw = max(46.0, px_box[2] - px_box[0])
@@ -564,11 +591,7 @@ class QwenVLDiagramEngine:
                 round(px_box[2] * 1000.0 / max(1.0, float(width))),
                 round(px_box[3] * 1000.0 / max(1.0, float(height))),
             ]
-            lab_q_final = (
-                f"Click or drag a box around [{t_label}] shown in this figure."
-                if grounding_tier == "Tier1-EasyOCR-CRAFT"
-                else (lc.get("lab_question") or rc.get("lab_question") or f"Click or drag a box around [{t_label}] in the diagram.")
-            )
+            lab_q_final = lc.get("lab_question") or rc.get("lab_question") or f"Click or drag a box around [{t_label}] shown in this figure."
             comp_item = {
                 "component_id": rc.get("component_id", f"c{concept_id}_p{idx + 1}"),
                 "target_label": str(t_label),

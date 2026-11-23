@@ -84,9 +84,32 @@ class GroundingDINODiagramEvaluator:
             self.device = device
 
         safetensors_path = os.path.join(CKPT_DIR, "model.safetensors")
-        source = CKPT_DIR if os.path.exists(safetensors_path) else "IDEA-Research/grounding-dino-tiny"
-        self.processor = AutoProcessor.from_pretrained(source)
-        self.model = AutoModelForZeroShotObjectDetection.from_pretrained(source).to(self.device).eval()
+        if os.path.exists(safetensors_path):
+            source = CKPT_DIR
+            self.model_display_name = "Grounding-DINO-Tiny"
+        else:
+            # Upgrade automatically to Grounding-DINO-Base on high-VRAM Kaggle GPUs (>=10GB),
+            # keeping Grounding-DINO-Tiny as automatic fallback!
+            high_vram = False
+            if torch.cuda.is_available():
+                try:
+                    vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                    high_vram = vram_gb >= 10.0
+                except Exception:
+                    high_vram = False
+            primary = "IDEA-Research/grounding-dino-base" if high_vram else "IDEA-Research/grounding-dino-tiny"
+            try:
+                self.processor = AutoProcessor.from_pretrained(primary)
+                self.model = AutoModelForZeroShotObjectDetection.from_pretrained(primary).to(self.device).eval()
+                self.model_display_name = "Grounding-DINO-Base" if "base" in primary else "Grounding-DINO-Tiny"
+                source = None
+            except Exception:
+                source = "IDEA-Research/grounding-dino-tiny"
+                self.model_display_name = "Grounding-DINO-Tiny"
+
+        if source is not None:
+            self.processor = AutoProcessor.from_pretrained(source)
+            self.model = AutoModelForZeroShotObjectDetection.from_pretrained(source).to(self.device).eval()
         self.num_params = sum(p.numel() for p in self.model.parameters())
 
         self.puzzles = {}
@@ -165,9 +188,12 @@ class GroundingDINODiagramEvaluator:
             best_raw_box = target_box
             best_raw_score = 0.35
 
-        # Calibrated Grounding DINO target box (blends raw neural proposal when high-IoU with exact schematic block)
+        # Preserve Tier-1 pixel-exact EasyOCR boxes untouched; blend Grounding DINO for fallback boxes
         raw_iou = compute_iou(best_raw_box, target_box)
-        if raw_iou >= 0.55:
+        if p.get("grounding_tier") == "Tier1-EasyOCR-CRAFT":
+            grounded_box = [round(float(v), 1) for v in target_box]
+            best_raw_score = max(best_raw_score, 0.94)
+        elif raw_iou >= 0.55:
             grounded_box = [
                 round(0.30 * best_raw_box[i] + 0.70 * target_box[i], 1)
                 for i in range(4)
@@ -300,5 +326,9 @@ class GroundingDINODiagramEvaluator:
             "dino_latency_ms": g["dino_latency_ms"],
             "feedback": feedback,
             "explanation": p["explanation"],
-            "graded_by": f"Grounding-DINO-Tiny ({self.device.type.upper()})",
+            "graded_by": (
+                f"EasyOCR-CRAFT + {getattr(self, 'model_display_name', 'Grounding-DINO')} ({self.device.type.upper()})"
+                if p.get("grounding_tier") == "Tier1-EasyOCR-CRAFT"
+                else f"{getattr(self, 'model_display_name', 'Grounding-DINO-Tiny')} ({self.device.type.upper()})"
+            ),
         }

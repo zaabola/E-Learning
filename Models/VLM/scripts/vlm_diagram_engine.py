@@ -175,10 +175,19 @@ class QwenVLDiagramEngine:
         from transformers import AutoProcessor, BitsAndBytesConfig
 
         source = VLM_CKPT_DIR if os.path.exists(VLM_CKPT_DIR) else self.model_id
-        print(f"[VLM] Loading {source} (4-bit={self.load_in_4bit}, device_map='auto')...")
+
+        # On Kaggle 2x T4 (30 GB total VRAM), run Qwen2.5-VL-7B in FULL FP16 (no 4-bit loss)!
+        # Automatically fall back to 4-bit NF4 if total GPU VRAM < 24 GB.
+        total_vram_gb = 0.0
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                total_vram_gb += torch.cuda.get_device_properties(i).total_memory / (1024 ** 3)
+        use_4bit = bool(self.load_in_4bit) and (total_vram_gb < 24.0)
+        precision_tag = "4-bit NF4" if use_4bit else "FULL FP16 (Multi-GPU)"
+        print(f"[VLM] Loading {source} ({precision_tag}, total_vram={total_vram_gb:.1f}GB, device_map='auto')...", flush=True)
 
         quant_config = None
-        if self.load_in_4bit and torch.cuda.is_available():
+        if use_4bit and torch.cuda.is_available():
             try:
                 quant_config = BitsAndBytesConfig(
                     load_in_4bit=True,
@@ -336,13 +345,14 @@ class QwenVLDiagramEngine:
         concept_id: int = 0,
         concept_title: str = "",
         slide_context: str = "",
+        ocr_regions: list = None,
         max_new_tokens: int = 1050,
         use_reference_cache: bool = False,
     ) -> dict:
         """
         Runs live Qwen-VL inference on an input course diagram image and returns
         the structured pedagogical + spatial JSON payload strictly grounded in
-        that specific image and its slide context.
+        that specific image, its OCR-detected regions, and its slide context.
         """
         self.load_live_vlm()
         abs_path = image_path if os.path.isabs(image_path) else os.path.join(REPO_ROOT, image_path)
@@ -352,13 +362,24 @@ class QwenVLDiagramEngine:
         ctx_snippet = (slide_context or "").strip()[:800]
         ctx_block = f"\nSlide / Page Text Context:\n\"\"\"\n{ctx_snippet}\n\"\"\"\n" if ctx_snippet else ""
 
+        ocr_regions = ocr_regions or []
+        ocr_block = ""
+        if ocr_regions:
+            lines_ocr = [f"  [{r['region_id']}] \"{r['label'][:85]}\"" for r in ocr_regions[:18]]
+            ocr_block = (
+                "\nOCR-Detected Printed Regions INSIDE THIS EXACT IMAGE:\n"
+                + "\n".join(lines_ocr)
+                + "\nIMPORTANT: For each of the 2 components in `components`, pick its EXACT `region_id` (integer) "
+                  "from the OCR list above and use that exact printed label as `target_label` (do NOT translate or invent labels not printed on the diagram!).\n"
+            )
+
         user_prompt = (
             f"Course Topic Hint: '{concept_title}'.\n"
             f"Image resolution: {width}x{height} pixels."
-            f"{ctx_block}\n"
+            f"{ctx_block}{ocr_block}\n"
             "1. First decide if this image is a meaningful technical/educational diagram, schema, chart, or table (`is_educational_diagram`: true) "
             "or just a decorative school logo / cover icon / stock photo (`is_educational_diagram`: false).\n"
-            "2. Identify 2 distinct, clearly labeled visual components INSIDE THIS EXACT IMAGE with accurate [0..1000] bounding boxes [x1, y1, x2, y2].\n"
+            "2. Select 2 distinct, pedagogically important components INSIDE THIS EXACT IMAGE (include `region_id` from the OCR list if provided).\n"
             "3. Generate 2 specific multiple-choice questions (`mc_questions`) and 1 analytical Visual Question Answering (`vqa_challenge`) strictly about THIS image and slide text. "
             "Do NOT invent unrelated topics. Return strict JSON."
         )
@@ -437,6 +458,10 @@ class QwenVLDiagramEngine:
 
         default_boxes = [[80, 160, 440, 820], [540, 160, 920, 820]]
         normalized_comps = []
+        used_ocr_ids = set()
+
+        from ocr_region_grounder import OCRRegionGrounder
+
         for idx in range(2):
             rc = ref_comps[idx] if idx < len(ref_comps) else {}
             lc = live_comps[idx] if idx < len(live_comps) else {}
@@ -453,10 +478,41 @@ class QwenVLDiagramEngine:
             )
 
             px_box = None
-            # For newly uploaded documents, run Qwen2.5-VL's dedicated native `bbox_2d` grounding pass!
-            if not use_reference_cache:
+            grounding_tier = "fallback"
+
+            # TIER 1 (PRIMARY): Pixel-exact EasyOCR CRAFT+CRNN region match (0 px drift!)
+            if not use_reference_cache and ocr_regions:
+                matched_reg = None
+                req_rid = lc.get("region_id", None)
+                if req_rid is not None:
+                    try:
+                        rid_int = int(req_rid)
+                        if 0 <= rid_int < len(ocr_regions) and rid_int not in used_ocr_ids:
+                            matched_reg = ocr_regions[rid_int]
+                    except Exception:
+                        matched_reg = None
+
+                if matched_reg is None:
+                    avail_regs = [r for r in ocr_regions if r["region_id"] not in used_ocr_ids]
+                    matched_reg = OCRRegionGrounder.match_label_to_region(avail_regs, str(t_label))
+
+                if matched_reg is not None:
+                    used_ocr_ids.add(matched_reg["region_id"])
+                    px_box = [float(v) for v in matched_reg["box"]]
+                    # Keep the exact printed diagram label so the student knows exactly what to click!
+                    t_label = matched_reg["label"]
+                    grounding_tier = "Tier1-EasyOCR-CRAFT"
+                    print(
+                        f"  [TIER-1 OCR LOCK] Region[{matched_reg['region_id']}] '{t_label[:48]}' -> pixel_box={px_box}",
+                        flush=True,
+                    )
+
+            # TIER 2 (FALLBACK): Dedicated native Qwen2.5-VL `bbox_2d` grounding pass
+            if px_box is None and not use_reference_cache:
                 try:
                     px_box = self.ground_component_bbox_live(img, target_label=str(t_label), dino_prompt=str(d_prompt))
+                    if px_box is not None:
+                        grounding_tier = "Tier2-Qwen2.5-VL-bbox2d"
                 except Exception as g_exc:
                     print(f"  [Qwen2.5-VL GROUND] Fallback on '{t_label}': {g_exc}", flush=True)
 
@@ -508,14 +564,20 @@ class QwenVLDiagramEngine:
                 round(px_box[2] * 1000.0 / max(1.0, float(width))),
                 round(px_box[3] * 1000.0 / max(1.0, float(height))),
             ]
+            lab_q_final = (
+                f"Click or drag a box around [{t_label}] shown in this figure."
+                if grounding_tier == "Tier1-EasyOCR-CRAFT"
+                else (lc.get("lab_question") or rc.get("lab_question") or f"Click or drag a box around [{t_label}] in the diagram.")
+            )
             comp_item = {
                 "component_id": rc.get("component_id", f"c{concept_id}_p{idx + 1}"),
                 "target_label": str(t_label),
                 "dino_prompt": str(d_prompt),
+                "grounding_tier": grounding_tier,
                 "vlm_box_1000": box_1000,
                 "vlm_box_px": px_box,
                 "ground_truth_box_px": rc.get("ground_truth_box_px", px_box) if use_reference_cache else px_box,
-                "lab_question": lc.get("lab_question") or rc.get("lab_question") or f"Click or drag a box around [{t_label}] in the diagram.",
+                "lab_question": lab_q_final,
                 "socratic_hint": lc.get("socratic_hint") or rc.get("socratic_hint") or f"Look closely for the [{t_label}] region in this figure.",
                 "explanation": lc.get("explanation") or rc.get("explanation") or parsed["visual_summary"],
             }

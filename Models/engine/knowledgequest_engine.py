@@ -170,7 +170,7 @@ class KnowledgeQuestAIEngine:
         # 4. Load Model #4 (Stage 2 Vision): Grounding DINO Zero-Shot Diagram Evaluator
         self.dino_evaluator = GroundingDINODiagramEvaluator(device=self.grader_device, prewarm=True)
         self.dino_info = {
-            'name': 'Grounding-DINO-Tiny',
+            'name': getattr(self.dino_evaluator, 'model_display_name', 'Grounding-DINO-Tiny'),
             'params': self.dino_evaluator.num_params,
             'device': str(self.grader_device),
             'puzzles': len(self.dino_evaluator.puzzles_list),

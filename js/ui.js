@@ -1671,7 +1671,7 @@ const UI = (() => {
               ${escHtml(p.prompt)}
             </div>
             <div style="position:relative;display:flex;justify-content:center;background:#0a101a;border:2px solid #2e4668;border-radius:6px;overflow:hidden">
-              <canvas id="dino-diagram-canvas" width="720" height="420" style="width:100%;max-height:215px;object-fit:contain;cursor:crosshair;touch-action:none"></canvas>
+              <canvas id="dino-diagram-canvas" width="720" height="420" style="width:auto;height:215px;aspect-ratio:720/420;max-width:100%;display:block;cursor:crosshair;touch-action:none"></canvas>
             </div>
             ${statusFooter}
             <div style="background:#101b2c;border:1px solid #3a5c88;border-radius:5px;padding:6px 9px;margin-top:6px">

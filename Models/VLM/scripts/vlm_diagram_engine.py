@@ -218,6 +218,118 @@ class QwenVLDiagramEngine:
         self.num_params = sum(p.numel() for p in self.vlm_model.parameters())
         print(f"[VLM] Loaded {source} ({self.num_params:,} params).")
 
+    def ground_component_bbox_live(
+        self,
+        img: Image.Image,
+        target_label: str,
+        dino_prompt: str = "",
+    ) -> list:
+        """
+        Dedicated fast 48-token native `Qwen2.5-VL` visual grounding pass.
+        Qwen2.5-VL outputs `bbox_2d: [x1, y1, x2, y2]` in the exact `image_grid_thw`
+        pixel grid `(grid_w * 14, grid_h * 14)` — NOT normalized [0..1000]!
+        """
+        self.load_live_vlm()
+        width, height = img.size
+        is_qwen25 = "2.5" in (self.model_id or "") or "3-VL" in (self.model_id or "")
+
+        ground_prompt = (
+            f'Locate the exact visual component labeled "{target_label}" in this diagram. '
+            'Output ONLY a JSON object with pixel coordinates: {"bbox_2d": [x1, y1, x2, y2]}'
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": img},
+                    {"type": "text", "text": ground_prompt},
+                ],
+            }
+        ]
+        text_input = self.vlm_processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.vlm_processor(
+            text=[text_input],
+            images=[img],
+            padding=True,
+            return_tensors="pt",
+        ).to(self.vlm_model.device)
+
+        # Read exact Qwen2.5-VL vision encoder resized pixel grid from image_grid_thw (patch_size = 14)
+        model_w, model_h = float(width), float(height)
+        if "image_grid_thw" in inputs and inputs["image_grid_thw"] is not None:
+            thw = inputs["image_grid_thw"][0].detach().cpu().tolist()
+            if len(thw) == 3:
+                model_h = float(thw[1]) * 14.0
+                model_w = float(thw[2]) * 14.0
+
+        with torch.no_grad():
+            gen_ids = self.vlm_model.generate(
+                **inputs,
+                max_new_tokens=64,
+                do_sample=False,
+            )
+        trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, gen_ids)]
+        raw = self.vlm_processor.batch_decode(
+            trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0]
+
+        box = None
+        try:
+            obj = extract_json_payload(raw)
+            cand = obj.get("bbox_2d") or obj.get("bbox") or obj.get("box")
+            if isinstance(cand, list) and len(cand) == 4:
+                box = [float(v) for v in cand]
+        except Exception:
+            nums = re.findall(r"-?\d+(?:\.\d+)?", raw)
+            if len(nums) >= 4:
+                box = [float(v) for v in nums[:4]]
+
+        if box is None:
+            return None
+
+        x1, y1, x2, y2 = box
+        if x2 < x1:
+            x1, x2 = x2, x1
+        if y2 < y1:
+            y1, y2 = y2, y1
+
+        # Map from Qwen2.5-VL absolute model pixel grid -> image canvas pixel coordinates
+        if is_qwen25 and max(x1, x2) <= model_w * 1.05 and max(y1, y2) <= model_h * 1.05:
+            px1 = x1 * (width / max(1.0, model_w))
+            py1 = y1 * (height / max(1.0, model_h))
+            px2 = x2 * (width / max(1.0, model_w))
+            py2 = y2 * (height / max(1.0, model_h))
+        else:
+            # Fallback for normalized [0..1000] scale (Qwen2-VL)
+            px1 = (x1 / 1000.0) * width
+            py1 = (y1 / 1000.0) * height
+            px2 = (x2 / 1000.0) * width
+            py2 = (y2 / 1000.0) * height
+
+        # Clamp to canvas and apply comfortable minimum clickable size around the EXACT detected center
+        px1 = max(2.0, min(float(width - 2), px1))
+        py1 = max(2.0, min(float(height - 2), py1))
+        px2 = max(2.0, min(float(width - 2), px2))
+        py2 = max(2.0, min(float(height - 2), py2))
+
+        cx = 0.5 * (px1 + px2)
+        cy = 0.5 * (py1 + py2)
+        bw = max(46.0, px2 - px1)
+        bh = max(34.0, py2 - py1)
+        final_box = [
+            round(max(2.0, cx - 0.5 * bw), 1),
+            round(max(2.0, cy - 0.5 * bh), 1),
+            round(min(float(width - 2), cx + 0.5 * bw), 1),
+            round(min(float(height - 2), cy + 0.5 * bh), 1),
+        ]
+        print(
+            f"  [Qwen2.5-VL GROUND] '{target_label}' | raw={box} | grid={int(model_w)}x{int(model_h)} -> canvas={final_box}",
+            flush=True,
+        )
+        return final_box
+
     def comprehend_diagram_live(
         self,
         image_path: str,
@@ -310,6 +422,15 @@ class QwenVLDiagramEngine:
             parsed["extracted_labels"] = ref_diag.get("extracted_labels", [parsed["concept_title"]])
 
         ref_comps = ref_diag.get("components", []) if use_reference_cache else []
+        # Read exact Qwen2.5-VL resized pixel grid from Pass 1 inputs
+        pass1_model_w, pass1_model_h = float(width), float(height)
+        if "image_grid_thw" in inputs and inputs["image_grid_thw"] is not None:
+            thw1 = inputs["image_grid_thw"][0].detach().cpu().tolist()
+            if len(thw1) == 3:
+                pass1_model_h = float(thw1[1]) * 14.0
+                pass1_model_w = float(thw1[2]) * 14.0
+        is_qwen25 = "2.5" in (self.model_id or "") or "3-VL" in (self.model_id or "")
+
         live_comps = parsed.get("components", [])
         if not isinstance(live_comps, list):
             live_comps = []
@@ -319,26 +440,6 @@ class QwenVLDiagramEngine:
         for idx in range(2):
             rc = ref_comps[idx] if idx < len(ref_comps) else {}
             lc = live_comps[idx] if idx < len(live_comps) else {}
-            box_1000 = lc.get("vlm_box_1000")
-            if not (isinstance(box_1000, list) and len(box_1000) == 4):
-                box_1000 = rc.get("vlm_box_1000", default_boxes[idx])
-            else:
-                try:
-                    box_1000 = [float(v) for v in box_1000]
-                except Exception:
-                    box_1000 = rc.get("vlm_box_1000", default_boxes[idx])
-
-            if use_reference_cache and rc.get("vlm_box_1000"):
-                raw_px = box_1000_to_pixel(box_1000, width, height)
-                gt_px = rc.get("ground_truth_box_px", raw_px)
-                if compute_iou(raw_px, gt_px) < 0.50:
-                    box_1000 = rc["vlm_box_1000"]
-
-            px_box = box_1000_to_pixel(box_1000, width, height)
-            # Ensure non-degenerate bounding box size
-            if (px_box[2] - px_box[0]) < 24 or (px_box[3] - px_box[1]) < 24:
-                box_1000 = default_boxes[idx]
-                px_box = box_1000_to_pixel(box_1000, width, height)
 
             t_label = (
                 (rc.get("target_label") if use_reference_cache else None)
@@ -350,6 +451,63 @@ class QwenVLDiagramEngine:
                 or lc.get("dino_prompt")
                 or f"{str(t_label).lower()} diagram box."
             )
+
+            px_box = None
+            # For newly uploaded documents, run Qwen2.5-VL's dedicated native `bbox_2d` grounding pass!
+            if not use_reference_cache:
+                try:
+                    px_box = self.ground_component_bbox_live(img, target_label=str(t_label), dino_prompt=str(d_prompt))
+                except Exception as g_exc:
+                    print(f"  [Qwen2.5-VL GROUND] Fallback on '{t_label}': {g_exc}", flush=True)
+
+            if px_box is None:
+                raw_b = lc.get("bbox_2d") or lc.get("vlm_box_1000")
+                if isinstance(raw_b, list) and len(raw_b) == 4:
+                    try:
+                        bx1, by1, bx2, by2 = [float(v) for v in raw_b]
+                        if bx2 < bx1:
+                            bx1, bx2 = bx2, bx1
+                        if by2 < by1:
+                            by1, by2 = by2, by1
+                        if not use_reference_cache and is_qwen25 and max(bx1, bx2) <= pass1_model_w * 1.05 and max(by1, by2) <= pass1_model_h * 1.05:
+                            px_box = [
+                                round(max(2.0, bx1 * (width / max(1.0, pass1_model_w))), 1),
+                                round(max(2.0, by1 * (height / max(1.0, pass1_model_h))), 1),
+                                round(min(float(width - 2), bx2 * (width / max(1.0, pass1_model_w))), 1),
+                                round(min(float(height - 2), by2 * (height / max(1.0, pass1_model_h))), 1),
+                            ]
+                        else:
+                            px_box = box_1000_to_pixel([bx1, by1, bx2, by2], width, height)
+                    except Exception:
+                        px_box = None
+
+            if px_box is None:
+                fallback_b1000 = rc.get("vlm_box_1000", default_boxes[idx])
+                px_box = box_1000_to_pixel(fallback_b1000, width, height)
+            else:
+                # Pad small components gently around their EXACT center rather than discarding them!
+                cx = 0.5 * (px_box[0] + px_box[2])
+                cy = 0.5 * (px_box[1] + px_box[3])
+                bw = max(46.0, px_box[2] - px_box[0])
+                bh = max(34.0, px_box[3] - px_box[1])
+                px_box = [
+                    round(max(2.0, cx - 0.5 * bw), 1),
+                    round(max(2.0, cy - 0.5 * bh), 1),
+                    round(min(float(width - 2), cx + 0.5 * bw), 1),
+                    round(min(float(height - 2), cy + 0.5 * bh), 1),
+                ]
+
+            if use_reference_cache and rc.get("vlm_box_1000"):
+                gt_px = rc.get("ground_truth_box_px", px_box)
+                if compute_iou(px_box, gt_px) < 0.50:
+                    px_box = box_1000_to_pixel(rc["vlm_box_1000"], width, height)
+
+            box_1000 = [
+                round(px_box[0] * 1000.0 / max(1.0, float(width))),
+                round(px_box[1] * 1000.0 / max(1.0, float(height))),
+                round(px_box[2] * 1000.0 / max(1.0, float(width))),
+                round(px_box[3] * 1000.0 / max(1.0, float(height))),
+            ]
             comp_item = {
                 "component_id": rc.get("component_id", f"c{concept_id}_p{idx + 1}"),
                 "target_label": str(t_label),

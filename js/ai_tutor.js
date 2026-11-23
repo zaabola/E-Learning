@@ -473,15 +473,28 @@ const AITutor = (() => {
 
     let data = startData;
     if (startData && startData.job_id && startData.job_status === 'running') {
+      const tStart = performance.now();
       if (onProgress) onProgress(startData.progress || 5, startData.step || 'Starting ingestion...');
       const jobId = startData.job_id;
-      const maxPolls = 240; // Up to 6 minutes for huge PDFs on Kaggle GPU
+      const maxPolls = 400; // Up to 10 minutes ceiling for very large PDFs
+      let consecutiveErrors = 0;
       for (let i = 0; i < maxPolls; i++) {
         await new Promise(r => setTimeout(r, 1500));
-        const poll = await apiFetch(`/api/course/ingest/status?job_id=${encodeURIComponent(jobId)}`, {
-          method: 'GET',
-        }, 12000);
-        if (onProgress) onProgress(poll.progress || 10, poll.step || 'Processing...');
+        let poll = null;
+        try {
+          poll = await apiFetch(`/api/course/ingest/status?job_id=${encodeURIComponent(jobId)}`, {
+            method: 'GET',
+          }, 15000);
+          consecutiveErrors = 0;
+        } catch (pollErr) {
+          consecutiveErrors++;
+          if (consecutiveErrors >= 8) {
+            throw new Error(`Lost connection while polling VLM status (${pollErr.message || 'network'}).`);
+          }
+          continue;
+        }
+        const elapsedSec = Math.round((performance.now() - tStart) / 1000);
+        if (onProgress) onProgress(poll.progress || 10, `[${elapsedSec}s] ${poll.step || 'Processing...'}`);
         if (poll.job_status === 'done') {
           data = poll;
           break;

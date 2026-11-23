@@ -641,7 +641,7 @@ def ingest_custom_course_package(
         slot_idx = len(accepted_slots)
         _report(
             20 + slot_idx * 14,
-            f"{vlm_name} (FP16) inspecting Page {cand['page']} diagram ({slot_idx + 1}/5): {cand['slide_title'][:34]}...",
+            f"{vlm_name} inspecting Page {cand['page']} diagram ({slot_idx + 1}/5): {cand['slide_title'][:34]}...",
         )
 
         vlm_res = None

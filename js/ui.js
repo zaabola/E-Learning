@@ -1838,9 +1838,9 @@ const UI = (() => {
           </div>
 
           <div style="position:absolute;right:16px;bottom:42px;width:448px;background:rgba(12,20,34,0.95);border:3px solid ${unlocked ? '#58f898' : '#58a8f8'};border-radius:8px;padding:10px 12px;box-shadow:0 6px 18px rgba(0,0,0,0.6)">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-              <span style="font-size:8.5px;color:${unlocked ? '#58f898' : '#68c8ff'}">&#128218; INSERT COURSE (PDF / PPTX / WORD)</span>
-              <span style="font-size:7.5px;color:#f8d048">${escHtml(vlmTag)} + ${escHtml(dinoTag)}</span>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
+              <span style="font-size:8px;color:${unlocked ? '#58f898' : '#68c8ff'};white-space:nowrap">&#128218; INSERT COURSE</span>
+              <span style="font-size:7px;color:#f8d048;white-space:nowrap">${escHtml(vlmTag)} + ${escHtml(dinoTag)}</span>
             </div>
             <div style="background:#09111c;border:1px dashed #4a82bc;border-radius:5px;padding:6px 8px;margin-bottom:6px">
               <input type="file" id="ts-course-file" accept=".pdf,.pptx,.ppt,.docx,.doc,image/*" ${uploading ? 'disabled' : ''} style="width:100%;font-size:11.5px;color:#dce8f6;cursor:pointer" />

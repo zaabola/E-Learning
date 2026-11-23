@@ -24,6 +24,9 @@ import time
 import urllib.request
 from http.server import ThreadingHTTPServer
 
+# Prevent CUDA VRAM fragmentation on Kaggle Tesla T4 GPUs
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)

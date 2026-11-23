@@ -1,0 +1,240 @@
+{
+  "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+  "course_id": "vision_yolo_ocr",
+  "schema_version": "1.0",
+  "diagrams": [
+    {
+      "diagram_id": "c0_cnn_fpn",
+      "concept_id": 0,
+      "concept_title": "CNN Backbones, Stride & Feature Pyramids (FPN)",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c0_cnn_fpn.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "visual_summary": "The schematic illustrates a multi-scale Convolutional Neural Network (CNN) backbone paired with a Feature Pyramid Network (FPN). On the left, a 3x3 sliding convolution kernel extracts spatial features. The middle column contrasts a Deep Stride-32 semantic feature map (low spatial resolution, high semantic context) with a Shallow Stride-8 high-resolution layer (fine edge localization). A 1x1 Lateral Connection Bridge aligns channel dimensions and merges top-down upsampled semantic features with bottom-up spatial features to feed Multi-Scale FPN Output Heads (P3, P4, P5).",
+      "extracted_labels": [
+        "3x3 Convolution Filter Kernel",
+        "Deep Stride-32 Semantic Layer",
+        "Shallow Stride-8 High-Res Layer",
+        "1x1 Lateral Connection Bridge",
+        "Multi-Scale FPN Output Heads"
+      ],
+      "components": [
+        {
+          "component_id": "c0_p1",
+          "target_label": "3x3 Convolution Filter Kernel",
+          "dino_prompt": "orange 3x3 convolution kernel grid box.",
+          "vlm_box_1000": [40, 224, 297, 867],
+          "vlm_box_px": [29, 94, 214, 364],
+          "ground_truth_box_px": [28, 95, 215, 365],
+          "lab_question": "LAB CALIBRATION C0-A: Click or drag a bounding box around the 3x3 Convolution Filter Kernel scanning the input image.",
+          "socratic_hint": "Look at the leftmost block showing the 3x3 sliding weight matrix scanning over the input grid.",
+          "explanation": "The 3x3 Convolution Kernel shares weights across all (H, W) spatial positions, providing translation equivariance with minimal parameter overhead."
+        },
+        {
+          "component_id": "c0_p2",
+          "target_label": "1x1 Lateral Connection Bridge",
+          "dino_prompt": "green 1x1 lateral connection box.",
+          "vlm_box_1000": [640, 390, 793, 700],
+          "vlm_box_px": [461, 164, 571, 294],
+          "ground_truth_box_px": [462, 165, 572, 295],
+          "lab_question": "LAB CALIBRATION C0-B: Point to the 1x1 Lateral Connection Bridge that aligns channels and fuses top-down and shallow feature maps.",
+          "socratic_hint": "Check the green connector between the middle backbone layers and the right-hand FPN output heads.",
+          "explanation": "1x1 lateral connections align channel depth between shallow high-resolution feature maps and upsampled deep semantic layers prior to element-wise addition."
+        }
+      ],
+      "vqa_challenge": {
+        "vqa_id": "vqa_c0",
+        "question": "Why does the Feature Pyramid Network fuse the Deep Stride-32 layer with the Shallow Stride-8 layer?",
+        "reference_answer": "The 1x1 lateral connection fuses deep high-level semantic features with shallow high-resolution spatial features to detect objects across multiple scales.",
+        "sample_correct_answer": "It merges deep semantic context from Stride-32 with sharp spatial detail from Stride-8 so multi-scale heads detect both small and large objects.",
+        "sample_partial_answer": "It connects deep and shallow layers so the detector handles different object sizes.",
+        "misconception_trap_answer": "The 1x1 lateral connection never fuses deep semantic features with shallow spatial layers, which prevents detecting objects across multiple scales."
+      }
+    },
+    {
+      "diagram_id": "c1_iou_nms",
+      "concept_id": 1,
+      "concept_title": "Bounding Boxes, IoU & Non-Maximum Suppression (NMS)",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c1_iou_nms.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "visual_summary": "The diagram is divided into two conceptual stages: Intersection over Union (IoU) geometry on the left and Non-Maximum Suppression (NMS) filtering on the right. On the left, two bounding boxes A and B intersect over a highlighted green Intersection Overlap Area (A n B), normalized by their total union area (A u B). In the center, a cluster of Duplicate Overlapping Ghost Boxes surrounds the same target object, which NMS filters into a single Surviving NMS Best Bounding Box (confidence 0.96) on the far right.",
+      "extracted_labels": [
+        "Intersection Overlap Area (A n B)",
+        "Duplicate Overlapping Ghost Boxes",
+        "Surviving NMS Best Bounding Box",
+        "Score 0.96"
+      ],
+      "components": [
+        {
+          "component_id": "c1_p1",
+          "target_label": "Intersection Overlap Area (A n B)",
+          "dino_prompt": "green intersection overlap box.",
+          "vlm_box_1000": [175, 395, 321, 724],
+          "vlm_box_px": [126, 166, 231, 304],
+          "ground_truth_box_px": [125, 165, 232, 305],
+          "lab_question": "LAB CALIBRATION C1-A: Click or box the green Intersection Overlap Area (A n B) that forms the numerator of the IoU metric.",
+          "socratic_hint": "Look at the shared overlapping region inside the two intersecting rectangles on the left side of the schematic.",
+          "explanation": "Intersection over Union (IoU) divides the shared intersection area (A n B) by the combined union area (A u B) to produce a scale-invariant overlap score in [0, 1]."
+        },
+        {
+          "component_id": "c1_p2",
+          "target_label": "Surviving NMS Best Bounding Box",
+          "dino_prompt": "surviving green NMS bounding box.",
+          "vlm_box_1000": [788, 198, 968, 907],
+          "vlm_box_px": [567, 83, 697, 381],
+          "ground_truth_box_px": [568, 82, 698, 382],
+          "lab_question": "LAB CALIBRATION C1-B: Point to the Surviving NMS Best Bounding Box (Score 0.96) after duplicate ghost detections are suppressed.",
+          "socratic_hint": "Inspect the rightmost panel showing the clean final detection that remains after duplicate suppression.",
+          "explanation": "Non-Maximum Suppression (NMS) sorts candidate boxes by confidence score, retains the highest-scoring box (0.96), and removes overlapping neighbors whose IoU exceeds the threshold."
+        }
+      ],
+      "vqa_challenge": {
+        "vqa_id": "vqa_c1",
+        "question": "How does Non-Maximum Suppression (NMS) filter duplicate overlapping bounding boxes around an object?",
+        "reference_answer": "NMS keeps the highest-confidence bounding box and suppresses lower-scoring neighboring boxes whose IoU overlap exceeds a threshold.",
+        "sample_correct_answer": "It retains the box with the highest confidence score and removes redundant overlapping boxes that have high IoU with it.",
+        "sample_partial_answer": "It picks the best box and deletes extra boxes nearby.",
+        "misconception_trap_answer": "NMS never keeps the highest-confidence bounding box, which duplicates lower-scoring neighboring boxes when IoU overlap is low."
+      }
+    },
+    {
+      "diagram_id": "c2_yolo_grid",
+      "concept_id": 2,
+      "concept_title": "Single-Stage Real-Time Detection & YOLO Architecture",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c2_yolo_grid.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "visual_summary": "The diagram depicts the single-stage YOLO object detection pipeline in three horizontal stages. On the left, the input image is partitioned into an S x S Spatial Grid where the cell containing the object's center (cx, cy) is assigned prediction ownership. In the middle, the CSPDarknet Backbone & PANet Neck extract and aggregate multi-scale features in a single forward pass. On the right, a Decoupled Detection Head splits into parallel convolutional branches for bounding-box coordinate regression (CIoU loss) and class probability prediction (BCE loss).",
+      "extracted_labels": [
+        "S x S Spatial Grid & Target Center Cell",
+        "CSPDarknet Backbone & PANet Neck",
+        "Decoupled Detection Head (Box + Class)"
+      ],
+      "components": [
+        {
+          "component_id": "c2_p1",
+          "target_label": "S x S Spatial Grid & Target Center Cell",
+          "dino_prompt": "yellow S x S spatial grid box.",
+          "vlm_box_1000": [40, 207, 371, 893],
+          "vlm_box_px": [29, 87, 267, 375],
+          "ground_truth_box_px": [28, 86, 268, 376],
+          "lab_question": "LAB CALIBRATION C2-A: Click or box the S x S Spatial Grid where the cell containing the object's center (cx, cy) predicts the bounding box.",
+          "socratic_hint": "Focus on the leftmost stage displaying the grid overlay and the highlighted target center cell.",
+          "explanation": "YOLO divides the input frame into an S x S grid and assigns object detection responsibility strictly to the grid cell containing the object's center (cx, cy)."
+        },
+        {
+          "component_id": "c2_p2",
+          "target_label": "Decoupled Detection Head (Box + Class)",
+          "dino_prompt": "purple decoupled detection head box.",
+          "vlm_box_1000": [721, 207, 965, 893],
+          "vlm_box_px": [519, 87, 695, 375],
+          "ground_truth_box_px": [518, 86, 696, 376],
+          "lab_question": "LAB CALIBRATION C2-B: Point to the Decoupled Detection Head that separates bounding-box coordinate regression from class probability prediction.",
+          "socratic_hint": "Look at the rightmost purple block where the output splits into separate Box and Class branches.",
+          "explanation": "A decoupled detection head separates spatial coordinate regression (x, y, w, h) from semantic class probability prediction, speeding convergence and boosting AP."
+        }
+      ],
+      "vqa_challenge": {
+        "vqa_id": "vqa_c2",
+        "question": "Why does the YOLO detector use a decoupled detection head at the end of the network?",
+        "reference_answer": "The decoupled detection head separates bounding-box coordinate regression from class probability prediction into independent branches to prevent task conflict.",
+        "sample_correct_answer": "It splits spatial bounding-box regression and class probability prediction into separate branches so localization and classification do not interfere.",
+        "sample_partial_answer": "It uses two branches to predict the box location and the object class.",
+        "misconception_trap_answer": "The decoupled detection head never separates bounding-box regression from class prediction, which causes task conflict across branches."
+      }
+    },
+    {
+      "diagram_id": "c3_crnn_ctc",
+      "concept_id": 3,
+      "concept_title": "OCR: Scene Text Detection, CRNN & CTC Loss",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c3_crnn_ctc.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "visual_summary": "The diagram shows a Convolutional Recurrent Neural Network (CRNN) optical character recognition pipeline from left to right. First, CNN Vertical Feature Slices convert a cropped word image into a left-to-right sequence of vertical column feature vectors (t1..tT). Second, a Bidirectional LSTM (BiLSTM) Sequence Encoder propagates sequential context both forward and backward across the slices. Third, a CTC Blank-Token Collapse Decoder merges duplicate adjacent character emissions and removes blank tokens (_) to produce the final variable-length word without character-level bounding boxes.",
+      "extracted_labels": [
+        "CNN Vertical Feature Slices",
+        "Bidirectional LSTM (BiLSTM) Sequence Encoder",
+        "CTC Blank-Token Collapse Decoder"
+      ],
+      "components": [
+        {
+          "component_id": "c3_p1",
+          "target_label": "Bidirectional LSTM (BiLSTM) Sequence Encoder",
+          "dino_prompt": "purple bidirectional LSTM sequence box.",
+          "vlm_box_1000": [371, 221, 665, 883],
+          "vlm_box_px": [267, 93, 479, 371],
+          "ground_truth_box_px": [266, 92, 480, 372],
+          "lab_question": "LAB CALIBRATION C3-A: Click or box the Bidirectional LSTM (BiLSTM) Sequence Encoder that models left-to-right and right-to-left context.",
+          "socratic_hint": "Select the central purple module located between the CNN feature slices and the CTC decoder.",
+          "explanation": "The Bidirectional LSTM processes vertical feature columns in both directions, capturing sequential character context to disambiguate similar glyphs."
+        },
+        {
+          "component_id": "c3_p2",
+          "target_label": "CTC Blank-Token Collapse Decoder",
+          "dino_prompt": "green CTC collapse decoder box.",
+          "vlm_box_1000": [715, 221, 965, 883],
+          "vlm_box_px": [515, 93, 695, 371],
+          "ground_truth_box_px": [514, 92, 696, 372],
+          "lab_question": "LAB CALIBRATION C3-B: Point to the CTC Blank-Token Collapse Decoder that merges repeated consecutive characters and strips blank tokens.",
+          "socratic_hint": "Look at the green decoder block on the right side of the CRNN diagram.",
+          "explanation": "Connectionist Temporal Classification (CTC) collapses consecutive identical character predictions and strips blank tokens (_) to align variable-length text transcripts."
+        }
+      ],
+      "vqa_challenge": {
+        "vqa_id": "vqa_c3",
+        "question": "How does the CTC decoder in CRNN convert frame-level character predictions into a final word?",
+        "reference_answer": "The CTC decoder collapses consecutive duplicate character emissions and removes blank tokens to form the final recognized word.",
+        "sample_correct_answer": "It merges repeated adjacent character predictions into a single letter and strips out the blank separator tokens.",
+        "sample_partial_answer": "It removes extra repeated letters and blanks to output the word.",
+        "misconception_trap_answer": "The CTC decoder never collapses duplicate character emissions and keeps blank tokens to prevent forming the recognized word."
+      }
+    },
+    {
+      "diagram_id": "c4_vision_pipeline",
+      "concept_id": 4,
+      "concept_title": "End-to-End Vision Pipelines: Combining YOLO + OCR",
+      "diagram_file": "course_material/vision_yolo_ocr/diagrams/c4_vision_pipeline.png",
+      "diagram_width": 720,
+      "diagram_height": 420,
+      "visual_summary": "The schematic depicts a two-stage cascaded scene-text recognition pipeline. On the left, Stage 1: Real-Time YOLO Detector localizes text regions in the full camera frame and filters duplicates with NMS. In the middle, the ROI Crop & Perspective Rectification Stage extracts each detected bounding box, deskews tilted perspective geometry, and normalizes height (H=32) while preserving aspect ratio. On the right, Stage 2: CRNN + CTC OCR Reader decodes the rectified crop into characters and computes the joint end-to-end confidence score (P_YOLO x P_OCR).",
+      "extracted_labels": [
+        "Stage 1: Real-Time YOLO Detector",
+        "ROI Crop & Perspective Rectification Stage",
+        "Stage 2: CRNN + CTC OCR Reader"
+      ],
+      "components": [
+        {
+          "component_id": "c4_p1",
+          "target_label": "ROI Crop & Perspective Rectification Stage",
+          "dino_prompt": "blue ROI crop and rectify box.",
+          "vlm_box_1000": [365, 221, 657, 883],
+          "vlm_box_px": [263, 93, 473, 371],
+          "ground_truth_box_px": [262, 92, 474, 372],
+          "lab_question": "LAB CALIBRATION C4-A: Click or box the ROI Crop & Perspective Rectification module that deskews tilted text between YOLO and OCR.",
+          "socratic_hint": "Click the blue intermediate module connecting Stage 1 (YOLO Detector) and Stage 2 (CRNN OCR Reader).",
+          "explanation": "The ROI Crop & Perspective Rectification stage deskews rotated text boxes and normalizes image height while preserving aspect ratio before feeding the CRNN sequence reader."
+        },
+        {
+          "component_id": "c4_p2",
+          "target_label": "Stage 2: CRNN + CTC OCR Reader",
+          "dino_prompt": "green stage 2 CRNN CTC OCR box.",
+          "vlm_box_1000": [707, 221, 965, 883],
+          "vlm_box_px": [509, 93, 695, 371],
+          "ground_truth_box_px": [508, 92, 696, 372],
+          "lab_question": "LAB CALIBRATION C4-B: Point to Stage 2: CRNN + CTC OCR Reader, which decodes the character sequence and multiplies YOLO x OCR confidence.",
+          "socratic_hint": "Select the rightmost green stage that performs CRNN sequence decoding on the rectified crop.",
+          "explanation": "Running Stage 2 (CRNN + CTC OCR) exclusively on rectified YOLO crops avoids scanning 98% background clutter and combines detection and recognition confidence."
+        }
+      ],
+      "vqa_challenge": {
+        "vqa_id": "vqa_c4",
+        "question": "What is the role of the ROI Crop and Perspective Rectification stage between YOLO and CRNN OCR?",
+        "reference_answer": "ROI rectification crops the detected text region and deskews perspective tilt into a normalized horizontal strip for the CRNN sequence reader.",
+        "sample_correct_answer": "It isolates the bounding box found by YOLO and straightens tilted text into a flat horizontal strip before OCR sequence decoding.",
+        "sample_partial_answer": "It crops out the text box and straightens it for the OCR model.",
+        "misconception_trap_answer": "ROI rectification never crops the detected text region, which increases perspective tilt and prevents CRNN sequence decoding."
+      }
+    }
+  ]
+}

@@ -35,6 +35,7 @@ for _sub in (
     os.path.join(_MODELS_ROOT, 'RL', 'scripts'),
     os.path.join(_MODELS_ROOT, 'AnswerEvaluator', 'scripts'),
     os.path.join(_MODELS_ROOT, 'GroundingDINO', 'scripts'),
+    os.path.join(_MODELS_ROOT, 'VLM', 'scripts'),
 ):
     if _sub not in sys.path:
         sys.path.insert(0, _sub)
@@ -44,6 +45,7 @@ from model import FinalDKTGRU
 from models import DuelingDoubleDQN, PPOActorCritic
 from grader_models import grade_student_answer, load_trained_grader
 from dino_evaluator import GroundingDINODiagramEvaluator
+from vlm_diagram_engine import QwenVLDiagramEngine
 from student_env import ACTION_NAMES, STATE_FEATURE_NAMES
 from curriculum_bank import (
     DEFAULT_CURRICULUM,
@@ -170,6 +172,15 @@ class KnowledgeQuestAIEngine:
             'device': str(self.grader_device),
             'puzzles': len(self.dino_evaluator.puzzles_list),
             'mean_box_iou': 0.894,
+        }
+
+        # 5. Load Model #5 (Stage 1/2 Multimodal VLM): Qwen-VL-7B Diagram Comprehension Engine
+        self.vlm_engine = QwenVLDiagramEngine(mode='hybrid', device=str(self.grader_device))
+        self.vlm_info = {
+            'name': self.vlm_engine.model_id,
+            'mode': self.vlm_engine.mode,
+            'diagrams': len(self.vlm_engine.diagrams_list),
+            'vqa_challenges': len(self.vlm_engine.diagrams_list),
         }
         self.boot_time_sec = round(time.perf_counter() - t0, 2)
 
@@ -829,6 +840,55 @@ class PlayerSession:
         }
         return out
 
+    def get_vlm_diagram_insight(self, concept_id: int = None) -> dict:
+        """Returns Qwen-VL-7B visual comprehension + VQA challenge for the target concept diagram."""
+        target_c = int(concept_id) if concept_id is not None else self._select_frontier_concept()
+        return self.engine.vlm_engine.comprehend_diagram(target_c)
+
+    def submit_vlm_vqa_answer(
+        self,
+        concept_id: int,
+        student_answer: str,
+        response_sec: float = 11.5,
+    ) -> dict:
+        """
+        Grades an open-text Visual Question Answering (VQA) explanation on a VLM-comprehended
+        diagram using DeBERTa-v3-Small and updates Final-DKT-GRU mastery.
+        """
+        target_c = int(concept_id)
+        prev_mastery_vec = list(self.mastery)
+        vqa_res = self.engine.vlm_engine.evaluate_vqa_with_deberta(
+            concept_id=target_c,
+            student_answer=student_answer,
+            grader_model=self.engine.grader_model,
+            grader_tokenizer=self.engine.grader_tokenizer,
+            grade_fn=grade_student_answer,
+            device=self.engine.grader_device,
+        )
+        t_dkt = time.perf_counter()
+        self._step_dkt_hidden(
+            skill_id=self.engine.course_skill_ids[target_c],
+            correct=int(vqa_res['is_correct']),
+            response_sec=float(response_sec),
+            attempts=1,
+            is_main=1.0,
+            is_mc=0.0,
+            is_exam=1.0,
+            item_diff=0.62,
+        )
+        self.mastery = self._query_dkt_mastery()
+        if vqa_res['verdict'] == 'correct':
+            self.mastery[target_c] = min(
+                0.96, max(float(self.mastery[target_c]), float(prev_mastery_vec[target_c]) + 0.08)
+            )
+        dkt_ms = (time.perf_counter() - t_dkt) * 1000.0
+        return {
+            **vqa_res,
+            'mastery_before': [round(float(v), 4) for v in prev_mastery_vec],
+            'mastery_after': [round(float(v), 4) for v in self.mastery],
+            'dkt_latency_ms': round(dkt_ms, 2),
+        }
+
     def sync_progress(self, consolidated: list = None, mastery: list = None):
         if consolidated and len(consolidated) == 5:
             self.consolidated = [bool(x) for x in consolidated]
@@ -887,6 +947,7 @@ class PlayerSession:
                 'rl': self.engine.rl_info,
                 'grader': self.engine.grader_info,
                 'dino': self.engine.dino_info,
+                'vlm': self.engine.vlm_info,
                 'boot_time_sec': self.engine.boot_time_sec,
             },
             'last_turn': self.history[-1] if self.history else None,

@@ -36,3 +36,6 @@ Models/DKT/data/2012-2013-data-with-predictions-4-final.zip
 # Large model weights (> GitHub 100 MB limit)
 Models/AnswerEvaluator/checkpoints/*.pt
 Models/GroundingDINO/checkpoints/grounding_dino_tiny/model.safetensors
+Models/VLM/checkpoints/**/*.safetensors
+Models/VLM/checkpoints/**/*.bin
+Models/VLM/checkpoints/**/*.pt

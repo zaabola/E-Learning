@@ -215,6 +215,49 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
             self._send_json({'result': rec, 'status': snap})
             return
 
+        if route == '/api/vision/vqa':
+            cid = int(body.get('concept_id', 0))
+            student_ans = str(body.get('student_answer', ''))
+            resp_sec = float(body.get('response_sec', 11.0))
+            with st.lock:
+                rec = st.session.submit_vlm_vqa_answer(
+                    concept_id=cid,
+                    student_answer=student_ans,
+                    response_sec=resp_sec,
+                )
+                snap = st.session.get_status_snapshot()
+            print(
+                f"  [VLM->DeBERTa VQA C{cid}] Verdict={rec['verdict'].upper()} "
+                f"(Score={rec['score']*100:.1f}%) | "
+                f"C{cid} Mastery: {rec['mastery_before'][cid]*100:.1f}% -> {rec['mastery_after'][cid]*100:.1f}% "
+                f"({rec['grader_latency_ms']:.1f}ms)"
+            )
+            self._send_json({'result': rec, 'status': snap})
+            return
+
+        if route == '/api/course/ingest':
+            course_title = str(body.get('course_title', 'Custom AI Course')).strip()
+            raw_notes = str(body.get('raw_notes', '')).strip()
+            image_base64 = body.get('image_base64', None)
+            remote_vlm_url = body.get('remote_vlm_url', None)
+            profile = str(body.get('profile', 'average'))
+            with st.lock:
+                st.session, pkg = st.engine.ingest_new_course(
+                    course_title=course_title,
+                    raw_notes=raw_notes,
+                    image_base64=image_base64,
+                    remote_vlm_url=remote_vlm_url,
+                    profile=profile,
+                )
+                snap = st.session.get_status_snapshot()
+                puzzles = st.session.get_diagram_puzzles()
+            print(
+                f"  [NEW COURSE INGESTED] '{pkg['title']}' (`{pkg['course_id']}`) | "
+                f"5 Concepts + {len(puzzles)} VLM/Grounding-DINO Diagram Puzzles!"
+            )
+            self._send_json({'status': snap, 'puzzles': puzzles, 'course_id': pkg['course_id']})
+            return
+
         self._send_json({'error': f'Unknown API route: {route}'}, status=404)
 
 
@@ -239,6 +282,7 @@ def main():
     print(f"  [Model #2] {eng.rl_info['name']:<20} | Reward={eng.rl_info['reward']:.2f}")
     print(f"  [Model #3] {eng.grader_info['name']:<20} | 3-Way Acc={eng.grader_info['acc_3way']*100:.2f}% ({eng.grader_info['device']})")
     print(f"  [Model #4] {eng.dino_info['name']:<20} | Mean Box IoU={eng.dino_info['mean_box_iou']:.3f} | {eng.dino_info['puzzles']} Lab Diagrams ({eng.dino_info['device']})")
+    print(f"  [Model #5] {eng.vlm_info['name']:<20} | Mode={eng.vlm_info['mode'].upper()} | {eng.vlm_info['vqa_challenges']} VQA Rubrics")
     print(f"  Active Course : {state.session.course_title} (`{state.session.course_id}`)")
     print(f"  Boot Time     : {eng.boot_time_sec:.2f}s (100% Local, Zero Webcam)")
     print("-" * 88)

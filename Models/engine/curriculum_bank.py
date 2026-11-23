@@ -513,9 +513,15 @@ def load_course_package(course_id: str = 'vision_yolo_ocr') -> dict:
     Loads a structured 5-concept course package by ID:
       - 'vision_yolo_ocr': Deep Learning Computer Vision (CNNs/FPN, IoU/NMS, YOLO, OCR/CRNN/CTC, Pipelines)
       - 'dl_foundations':  Deep Learning & Adaptive AI Foundations (DEFAULT_CURRICULUM)
+      - Any custom ingested course under `course_material/<course_id>/course_curriculum.json`
     """
     if course_id == 'vision_yolo_ocr' and os.path.exists(VISION_CURRICULUM_JSON):
         with open(VISION_CURRICULUM_JSON, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    custom_json = os.path.join(_REPO_ROOT, 'course_material', str(course_id), 'course_curriculum.json')
+    if os.path.exists(custom_json):
+        with open(custom_json, 'r', encoding='utf-8') as f:
             return json.load(f)
 
     return {
@@ -540,5 +546,22 @@ def list_available_courses() -> list:
         'title': 'Deep Learning & Neural Foundations',
         'subtitle': 'Activations, Gradient Descent, Backprop, Regularization & Attention',
     })
+    cm_root = os.path.join(_REPO_ROOT, 'course_material')
+    if os.path.isdir(cm_root):
+        for entry in sorted(os.listdir(cm_root)):
+            if entry in ('vision_yolo_ocr', '__pycache__'):
+                continue
+            c_json = os.path.join(cm_root, entry, 'course_curriculum.json')
+            if os.path.isfile(c_json):
+                try:
+                    with open(c_json, 'r', encoding='utf-8') as f:
+                        d = json.load(f)
+                    courses.append({
+                        'course_id': d.get('course_id', entry),
+                        'title': d.get('title', entry),
+                        'subtitle': d.get('subtitle', 'Custom VLM + Grounding DINO Course'),
+                    })
+                except Exception:
+                    pass
     return courses
 

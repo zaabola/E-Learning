@@ -46,6 +46,7 @@ from models import DuelingDoubleDQN, PPOActorCritic
 from grader_models import grade_student_answer, load_trained_grader
 from dino_evaluator import GroundingDINODiagramEvaluator
 from vlm_diagram_engine import QwenVLDiagramEngine
+from custom_course_ingestor import ingest_custom_course_package
 from student_env import ACTION_NAMES, STATE_FEATURE_NAMES
 from curriculum_bank import (
     DEFAULT_CURRICULUM,
@@ -190,12 +191,45 @@ class KnowledgeQuestAIEngine:
             pkg = load_course_package(course_id)
             curriculum = pkg['concepts']
             course_meta = pkg
+            if pkg.get('puzzles'):
+                self.dino_evaluator.puzzles_list = pkg['puzzles']
+                self.dino_evaluator.puzzles = {p['puzzle_id']: p for p in pkg['puzzles']}
+                self.dino_evaluator._grounding_cache.clear()
+            else:
+                self.dino_evaluator._load_puzzles()
+                self.dino_evaluator._grounding_cache.clear()
+
+            if pkg.get('vlm_diagrams'):
+                self.vlm_engine.diagrams_list = pkg['vlm_diagrams']
+                self.vlm_engine.diagrams_by_id = {d['diagram_id']: d for d in pkg['vlm_diagrams']}
+                self.vlm_engine.diagrams_by_concept = {int(d['concept_id']): d for d in pkg['vlm_diagrams']}
+            else:
+                self.vlm_engine._load_cached_extractions()
+
         return PlayerSession(
             self,
             profile=profile,
             curriculum=curriculum or DEFAULT_CURRICULUM,
             course_meta=course_meta,
         )
+
+    def ingest_new_course(
+        self,
+        course_title: str,
+        raw_notes: str = '',
+        image_base64: str = None,
+        remote_vlm_url: str = None,
+        profile: str = 'average',
+    ):
+        pkg = ingest_custom_course_package(
+            course_title=course_title,
+            raw_notes=raw_notes,
+            image_base64=image_base64,
+            remote_vlm_url=remote_vlm_url,
+            vlm_engine=self.vlm_engine,
+            dino_evaluator=self.dino_evaluator,
+        )
+        return self.create_session(profile=profile, course_id=pkg['course_id']), pkg
 
 
 class PlayerSession:
@@ -738,7 +772,19 @@ class PlayerSession:
         return record
 
     def get_diagram_puzzles(self, concept_id: int = None) -> list:
-        return self.engine.dino_evaluator.list_puzzles(concept_id=concept_id)
+        raw_puzzles = self.engine.dino_evaluator.list_puzzles(concept_id=concept_id)
+        enriched = []
+        for p in raw_puzzles:
+            item = dict(p)
+            cid = int(item.get('concept_id', 0))
+            vlm_d = self.engine.vlm_engine.diagrams_by_concept.get(cid, {})
+            vqa = vlm_d.get('vqa_challenge', {})
+            item['vlm_model'] = self.engine.vlm_engine.model_id
+            item['vlm_visual_summary'] = vlm_d.get('visual_summary', item.get('explanation', ''))
+            item['vlm_vqa_question'] = vqa.get('question', '')
+            item['vlm_vqa_reference'] = vqa.get('reference_answer', '')
+            enriched.append(item)
+        return enriched
 
     def submit_diagram_interaction(
         self,

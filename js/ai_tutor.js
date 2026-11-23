@@ -434,6 +434,7 @@ const AITutor = (() => {
     localTurn = 0;
     localFailStreak = 0;
     localBadges = [false, false, false, false, false];
+    visionPuzzlesCache = null;
     localMastery = profile === 'struggling'
       ? [0.25, 0.25, 0.22, 0.22, 0.20]
       : (profile === 'advanced' ? [0.64, 0.62, 0.58, 0.56, 0.52] : [0.40, 0.38, 0.35, 0.35, 0.32]);
@@ -451,6 +452,55 @@ const AITutor = (() => {
       persistToPlayer(statusCache);
     }
     return statusCache;
+  }
+
+  async function ingestCustomCourse(payload = {}) {
+    visionPuzzlesCache = null;
+    try {
+      const data = await apiFetch('/api/course/ingest', {
+        method: 'POST',
+        body: JSON.stringify({
+          course_title: payload.courseTitle || 'Custom AI Course',
+          raw_notes: payload.rawNotes || '',
+          image_base64: payload.imageBase64 || null,
+          remote_vlm_url: payload.remoteVlmUrl || null,
+          profile: payload.profile || 'average',
+        }),
+      }, 20000);
+      online = true;
+      statusCache = data.status;
+      if (Array.isArray(data.puzzles) && data.puzzles.length) {
+        visionPuzzlesCache = data.puzzles;
+      }
+      persistToPlayer(statusCache);
+      return data;
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  async function submitVisionVQA(conceptId, studentAnswer, responseSec = 10.0) {
+    if (online) {
+      const data = await apiFetch('/api/vision/vqa', {
+        method: 'POST',
+        body: JSON.stringify({
+          concept_id: Number(conceptId || 0),
+          student_answer: String(studentAnswer || ''),
+          response_sec: Number(responseSec || 10.0),
+        }),
+      }, 10000);
+      statusCache = data.status;
+      persistToPlayer(data.status);
+      return data.result;
+    }
+    return {
+      concept_id: Number(conceptId || 0),
+      verdict: studentAnswer && studentAnswer.trim().length > 18 ? 'correct' : 'partial',
+      score: studentAnswer && studentAnswer.trim().length > 18 ? 0.88 : 0.48,
+      grader_latency_ms: 1.0,
+      mastery_before: localMastery.slice(),
+      mastery_after: localMastery.slice(),
+    };
   }
 
   function resolveBattleFocus(ctx = {}) {
@@ -952,10 +1002,12 @@ const AITutor = (() => {
     syncFromPlayerSave,
     refreshStatus,
     resetSession,
+    ingestCustomCourse,
     nextEncounter,
     submitEncounter,
     getVisionPuzzles,
     submitVisionPuzzle,
+    submitVisionVQA,
     playPodcast,
     stopPodcast,
     isOnline: () => online,

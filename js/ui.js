@@ -45,7 +45,7 @@ const Input = (() => {
   }
 
   window.addEventListener('keydown', (e) => {
-    if (e.target && e.target.tagName === 'TEXTAREA' && e.key !== 'Escape') return;
+    if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') && e.key !== 'Escape') return;
     const name = mapKey(e.key);
     if (!name) return;
     e.preventDefault();
@@ -1208,28 +1208,43 @@ const UI = (() => {
             </div>
           `;
         } else {
-          const m = st.models || { dkt: {}, rl: {}, grader: {}, dino: {} };
+          const m = st.models || { dkt: {}, rl: {}, grader: {}, dino: {}, vlm: {} };
+          const availCourses = (st.available_courses || []).map(ac => `
+            <button type="button" class="ai-btn-mini" data-course="${escHtml(ac.course_id)}" data-prof="average" style="${st.course_id === ac.course_id ? 'border-color:#58f898;color:#58f898' : ''}">${escHtml(ac.title.slice(0, 28))}</button>
+          `).join('');
           bodyHtml = `
-            <div class="kq-scroll ai-scroll" style="background:#101722;border:1px solid #2e4058;border-radius:6px;padding:12px">
-              <div style="font-size:9px;color:#68c0f8;margin-bottom:8px">LOADED PYTORCH CHECKPOINTS (4-MODEL HYBRID ENGINE)</div>
-              <div style="font-family:var(--dialog-font);font-size:17px;line-height:1.35;color:#dce8f6;margin-bottom:10px">
-                &bull; <strong>Model #1 (Knowledge Tracing):</strong> ${escHtml(m.dkt && m.dkt.name)} (Test AUC: 0.7996)<br>
-                &bull; <strong>Model #2 (Adaptive Game Master):</strong> ${escHtml(m.rl && m.rl.name)} (5-Action Policy)<br>
-                &bull; <strong>Model #3 (Semantic Grader):</strong> ${escHtml(m.grader && m.grader.name)} (${escHtml(m.grader && m.grader.device)})<br>
-                &bull; <strong>Model #4 (Vision Grounding):</strong> ${escHtml((m.dino && m.dino.name) || 'Grounding-DINO-Tiny')} (Mean IoU: 0.894 &middot; 10 Lab Diagrams)
+            <div class="kq-scroll ai-scroll" style="background:#101722;border:1px solid #2e4058;border-radius:6px;padding:10px">
+              <div style="font-size:8.5px;color:#68c0f8;margin-bottom:6px">LOADED PYTORCH &amp; KAGGLE PIPELINE (5-MODEL MULTIMODAL ENGINE)</div>
+              <div style="font-family:var(--dialog-font);font-size:15.5px;line-height:1.28;color:#dce8f6;margin-bottom:8px">
+                &bull; <strong>Model #1 (DKT):</strong> ${escHtml((m.dkt && m.dkt.name) || 'Final-DKT-GRU')} (AUC: 0.7996) &nbsp;
+                &bull; <strong>Model #2 (RL GM):</strong> ${escHtml((m.rl && m.rl.name) || 'Double-DQN')}<br>
+                &bull; <strong>Model #3 (Grader):</strong> ${escHtml((m.grader && m.grader.name) || 'DeBERTa-v3-Small')} &nbsp;
+                &bull; <strong>Model #4 (Spatial):</strong> ${escHtml((m.dino && m.dino.name) || 'Grounding-DINO-Tiny')}<br>
+                &bull; <strong>Model #5 (VLM):</strong> ${escHtml((m.vlm && m.vlm.name) || 'Qwen/Qwen2.5-VL-7B-Instruct')} (Dual-Vision Fused IoU: 0.993)
               </div>
-              <div style="margin-bottom:10px">
-                <button type="button" class="ai-btn-primary" id="kq-open-dino-btn">&#128269; LAUNCH GROUNDING DINO LAB MONITOR (10 DIAGRAM PUZZLES)</button>
+              <div style="margin-bottom:8px">
+                <button type="button" class="ai-btn-primary" id="kq-open-dino-btn">&#128269; LAUNCH VLM + GROUNDING DINO LAB MONITOR (10 PUZZLES + VQA)</button>
               </div>
-              <div style="font-size:9px;color:#f8d048;margin-bottom:6px">SWITCH COURSE / TEST LEARNER PROFILE</div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-                <button type="button" class="ai-btn-mini" data-course="vision_yolo_ocr" data-prof="average">Course: YOLO &amp; OCR (Average)</button>
-                <button type="button" class="ai-btn-mini" data-course="vision_yolo_ocr" data-prof="struggling">YOLO &amp; OCR (Struggling &rarr; Hints)</button>
-                <button type="button" class="ai-btn-mini" data-course="vision_yolo_ocr" data-prof="advanced">YOLO &amp; OCR (Advanced &rarr; Boss)</button>
-                <button type="button" class="ai-btn-mini" data-course="dl_foundations" data-prof="average">Course: DL Foundations</button>
+              <div style="font-size:8.5px;color:#f8d048;margin-bottom:5px">ACTIVE COURSES (CLICK TO SWITCH)</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px">
+                ${availCourses || '<button type="button" class="ai-btn-mini" data-course="vision_yolo_ocr" data-prof="average">YOLO &amp; OCR</button>'}
               </div>
-              <div style="font-family:var(--dialog-font);font-size:16px;color:#9bb4ce">
-                Tip: Walk up to the Computer Console in Prof. Ada's Lab (or click the button above) to solve Grounding DINO visual diagram puzzles!
+              <div style="background:#142236;border:1px solid #4888c8;border-radius:6px;padding:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:5px">
+                  <span style="font-size:8.5px;color:#58f898">+ INGEST NEW COURSE &amp; SLIDE DIAGRAM (Qwen2.5-VL-7B + Grounding DINO)</span>
+                  <div style="display:flex;gap:4px">
+                    <button type="button" class="ai-btn-mini" id="kq-preset-os">Preset: OS &amp; Memory</button>
+                    <button type="button" class="ai-btn-mini" id="kq-preset-net">Preset: Networks &amp; TCP</button>
+                  </div>
+                </div>
+                <input type="text" id="kq-new-title" placeholder="Course Title (e.g. Operating Systems: Virtual Memory & Paging)" style="width:100%;box-sizing:border-box;background:#0b1320;color:#fff;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:15px;margin-bottom:5px" />
+                <textarea id="kq-new-notes" rows="3" placeholder="Enter 5 Concept Lines (1 per line, C0..C4):&#10;1. Virtual Address Spaces & Page Tables: Translating virtual pages to physical frames&#10;2. Translation Lookaside Buffer (TLB): Hardware associative cache for fast address lookup&#10;3. Page Faults & Demand Paging: Handling missing pages from disk swap&#10;4. Page Replacement Algorithms (LRU & Clock): Evicting optimal frames under thrashing&#10;5. End-to-End MMU + TLB + OS Memory Pipeline: Complete hardware-software synthesis" style="width:100%;box-sizing:border-box;background:#0b1320;color:#dce8f6;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:14.5px;margin-bottom:5px"></textarea>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
+                  <label style="font-family:var(--dialog-font);font-size:14.5px;color:#9cc4e8;cursor:pointer">
+                    &#128444; Optional Diagram Image (.png/.jpg): <input type="file" id="kq-new-img" accept="image/*" style="font-size:11px;color:#9cc4e8;max-width:170px" />
+                  </label>
+                  <button type="button" class="ai-btn-primary" id="kq-ingest-btn" style="width:auto;padding:6px 12px">&#9889; INGEST COURSE &amp; TEST IN LAB</button>
+                </div>
               </div>
             </div>
           `;
@@ -1239,19 +1254,19 @@ const UI = (() => {
           <div class="kq-journal-win">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
               <div>
-                <div class="quest-title-badge">KNOWLEDGEQUEST AI FIELD JOURNAL</div>
+                <div class="quest-title-badge">ADAPTIVE E-LEARNING AI FIELD JOURNAL</div>
                 <div class="quest-subtitle">${escHtml(st.course_title || 'Deep Learning Vision: CNNs, YOLO & OCR')}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
                 <span class="ai-dot ${live ? '' : 'offline'}"></span>
-                <span style="font-size:8px;color:${live ? '#78f098' : '#f8b848'}">${live ? '4-MODEL SERVER ONLINE' : 'OFFLINE FALLBACK'}</span>
+                <span style="font-size:8px;color:${live ? '#78f098' : '#f8b848'}">${live ? '5-MODEL SERVER ONLINE' : 'OFFLINE FALLBACK'}</span>
                 <button type="button" class="ai-btn-mini" id="kq-close-btn">&#10005; CLOSE</button>
               </div>
             </div>
             <div class="kq-tabs">
               <button type="button" class="kq-tab ${tab === 0 ? 'active' : ''}" data-tab="0">[1] AI MASTERY &amp; AFFECT</button>
-              <button type="button" class="kq-tab ${tab === 1 ? 'active' : ''}" data-tab="1">[2] STUDY NOTES (YOLO/OCR)</button>
-              <button type="button" class="kq-tab ${tab === 2 ? 'active' : ''}" data-tab="2">[3] AI LAB &amp; GROUNDING DINO</button>
+              <button type="button" class="kq-tab ${tab === 1 ? 'active' : ''}" data-tab="1">[2] STUDY NOTES &amp; AUDIO</button>
+              <button type="button" class="kq-tab ${tab === 2 ? 'active' : ''}" data-tab="2">[3] VLM, DINO LAB &amp; NEW COURSE</button>
             </div>
             ${bodyHtml}
             <div style="margin-top:7px;font-size:7.5px;color:#8aa0be;text-align:right">
@@ -1269,6 +1284,84 @@ const UI = (() => {
             scr.remove();
             await dinoDiagramScreen(selConcept);
             resolve();
+          };
+        }
+        const presetOsBtn = scr.querySelector('#kq-preset-os');
+        if (presetOsBtn) {
+          presetOsBtn.onclick = () => {
+            const tEl = scr.querySelector('#kq-new-title');
+            const nEl = scr.querySelector('#kq-new-notes');
+            if (tEl) tEl.value = 'Operating Systems: Virtual Memory & Paging';
+            if (nEl) nEl.value = [
+              '1. Virtual Address Spaces & Page Tables: Translating virtual page numbers (VPN) to physical frame numbers (PFN)',
+              '2. Translation Lookaside Buffer (TLB): Hardware associative cache accelerating address translation in 1 cycle',
+              '3. Page Faults & Demand Paging: OS trap handler loading missing pages from NVMe swap into RAM frames',
+              '4. Page Replacement Algorithms (LRU & Clock): Evicting least recently used frames to prevent thrashing',
+              '5. End-to-End MMU + TLB + OS Virtual Memory Pipeline: Full hardware-software address translation synthesis',
+            ].join('\n');
+            Sfx.cursor();
+          };
+        }
+        const presetNetBtn = scr.querySelector('#kq-preset-net');
+        if (presetNetBtn) {
+          presetNetBtn.onclick = () => {
+            const tEl = scr.querySelector('#kq-new-title');
+            const nEl = scr.querySelector('#kq-new-notes');
+            if (tEl) tEl.value = 'Computer Networks: TCP/IP, Routing & Congestion';
+            if (nEl) nEl.value = [
+              '1. OSI & TCP/IP Encapsulation: Wrapping application payloads into transport segments, IP packets, and link frames',
+              '2. TCP 3-Way Handshake & Reliable Sliding Window: SYN, SYN-ACK, ACK sequencing and cumulative acknowledgments',
+              '3. IPv4 Subnetting & Longest Prefix Match Routing: Forwarding packets across router forwarding tables',
+              '4. TCP Congestion Control (AIMD & Fast Recovery): Additive increase, multiplicative decrease and congestion window sizing',
+              '5. End-to-End Full-Stack Network Packet Journey: DNS resolution, TLS handshake, TCP transport, and BGP/OSPF routing',
+            ].join('\n');
+            Sfx.cursor();
+          };
+        }
+        const ingestBtn = scr.querySelector('#kq-ingest-btn');
+        if (ingestBtn) {
+          ingestBtn.onclick = async () => {
+            const tEl = scr.querySelector('#kq-new-title');
+            const nEl = scr.querySelector('#kq-new-notes');
+            const fEl = scr.querySelector('#kq-new-img');
+            const titleVal = (tEl && tEl.value.trim()) || 'Operating Systems: Virtual Memory & Paging';
+            const notesVal = (nEl && nEl.value.trim()) || [
+              '1. Virtual Address Spaces & Page Tables: Translating virtual page numbers to physical frames',
+              '2. Translation Lookaside Buffer (TLB): Hardware cache accelerating address lookup',
+              '3. Page Faults & Demand Paging: OS trap handler loading pages from disk swap',
+              '4. Page Replacement (LRU & Clock): Evicting optimal frames to stop thrashing',
+              '5. End-to-End MMU + TLB + OS Pipeline: Hardware-software virtual memory synthesis',
+            ].join('\n');
+            ingestBtn.disabled = true;
+            ingestBtn.textContent = 'INGESTING WITH VLM + GROUNDING DINO...';
+            Sfx.select();
+
+            let imgB64 = null;
+            if (fEl && fEl.files && fEl.files[0]) {
+              imgB64 = await new Promise((resB64) => {
+                const reader = new FileReader();
+                reader.onload = () => resB64(reader.result);
+                reader.onerror = () => resB64(null);
+                reader.readAsDataURL(fEl.files[0]);
+              });
+            }
+            try {
+              await AITutor.ingestCustomCourse({
+                courseTitle: titleVal,
+                rawNotes: notesVal,
+                imageBase64: imgB64,
+                profile: 'average',
+              });
+              toast(`Ingested "${titleVal}"! Launching Lab Monitor...`);
+              if (unsub) { unsub(); unsub = null; }
+              scr.remove();
+              await dinoDiagramScreen(0);
+              resolve();
+            } catch (err) {
+              ingestBtn.disabled = false;
+              ingestBtn.textContent = 'RETRY INGEST COURSE';
+              toast('Make sure server.py is running on port 8000!');
+            }
           };
         }
         scr.querySelectorAll('.kq-tab').forEach(b => {
@@ -1529,32 +1622,81 @@ const UI = (() => {
           `;
         }
 
+        const vqaQ = p.vlm_vqa_question || `Explain how [${p.target_label}] functions inside ${p.concept_title}.`;
+        const vqaRef = p.vlm_vqa_reference || p.explanation || '';
+
         scr.innerHTML = `
           <div class="kq-journal-win" style="padding:10px 14px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px">
               <div>
-                <div class="quest-title-badge" style="color:#58f898">PROF. ADA'S LAB MONITOR &mdash; GROUNDING DINO VISION AI</div>
+                <div class="quest-title-badge" style="color:#58f898">PROF. ADA'S LAB MONITOR &mdash; Qwen2.5-VL-7B + GROUNDING DINO</div>
               </div>
               <div style="display:flex;align-items:center;gap:6px">
                 <span class="ai-dot ${live ? '' : 'offline'}"></span>
-                <span style="font-size:7.5px;color:${live ? '#78f098' : '#f8b848'}">${live ? 'GROUNDING-DINO-TINY (CUDA)' : 'OFFLINE DINO CACHE'}</span>
+                <span style="font-size:7.5px;color:${live ? '#78f098' : '#f8b848'}">${live ? 'QWEN-VL + DINO + DeBERTa (CUDA)' : 'OFFLINE CACHE'}</span>
                 <button type="button" class="ai-btn-mini" id="dino-next-btn">NEXT PUZZLE &rarr;</button>
                 <button type="button" class="ai-btn-mini" id="dino-close-btn">&#10005; EXIT</button>
               </div>
             </div>
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${pills}</div>
-            <div style="background:#142238;border:1px solid #3c6ea8;border-radius:5px;padding:6px 10px;margin-bottom:6px;font-family:var(--dialog-font);font-size:17px;color:#f8e078">
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px">${pills}</div>
+            <div style="background:#142238;border:1px solid #3c6ea8;border-radius:5px;padding:5px 10px;margin-bottom:5px;font-family:var(--dialog-font);font-size:16px;color:#f8e078">
               ${escHtml(p.prompt)}
             </div>
             <div style="position:relative;display:flex;justify-content:center;background:#0a101a;border:2px solid #2e4668;border-radius:6px;overflow:hidden">
-              <canvas id="dino-diagram-canvas" width="720" height="420" style="width:100%;max-height:245px;object-fit:contain;cursor:crosshair;touch-action:none"></canvas>
+              <canvas id="dino-diagram-canvas" width="720" height="420" style="width:100%;max-height:215px;object-fit:contain;cursor:crosshair;touch-action:none"></canvas>
             </div>
             ${statusFooter}
+            <div style="background:#101b2c;border:1px solid #3a5c88;border-radius:5px;padding:6px 9px;margin-top:6px">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px">
+                <span style="font-size:8px;color:#68c8ff">VLM VISUAL QUESTION (Qwen2.5-VL-7B &rarr; DeBERTa-v3 Grader):</span>
+                <button type="button" class="ai-btn-mini" id="dino-vqa-fill">Auto-Fill Answer</button>
+              </div>
+              <div style="font-family:var(--dialog-font);font-size:15px;color:#e4eef8;margin-bottom:4px">${escHtml(vqaQ)}</div>
+              <div style="display:flex;gap:6px">
+                <input type="text" id="dino-vqa-input" placeholder="Type 1-sentence answer about this diagram..." style="flex:1;background:#09111c;color:#fff;border:1px solid #35567e;border-radius:4px;padding:4px 8px;font-family:var(--dialog-font);font-size:15px" />
+                <button type="button" class="ai-btn-primary" id="dino-vqa-submit" style="width:auto;padding:4px 10px">GRADE VQA</button>
+              </div>
+              <div id="dino-vqa-out" style="font-family:var(--dialog-font);font-size:14.5px;color:#88e8a8;margin-top:3px"></div>
+            </div>
           </div>
         `;
 
         const closeBtn = scr.querySelector('#dino-close-btn');
         if (closeBtn) closeBtn.onclick = closeScreen;
+        const vqaFillBtn = scr.querySelector('#dino-vqa-fill');
+        if (vqaFillBtn) {
+          vqaFillBtn.onclick = () => {
+            const inp = scr.querySelector('#dino-vqa-input');
+            if (inp) inp.value = vqaRef;
+            Sfx.cursor();
+          };
+        }
+        const vqaSubBtn = scr.querySelector('#dino-vqa-submit');
+        if (vqaSubBtn) {
+          vqaSubBtn.onclick = async () => {
+            const inp = scr.querySelector('#dino-vqa-input');
+            const outEl = scr.querySelector('#dino-vqa-out');
+            const ans = (inp && inp.value.trim()) || vqaRef;
+            if (!ans) return;
+            vqaSubBtn.disabled = true;
+            vqaSubBtn.textContent = 'GRADING...';
+            Sfx.select();
+            try {
+              const res = await AITutor.submitVisionVQA(p.concept_id, ans, 9.5);
+              const pct = Math.round((res.score || 0) * 100);
+              const col = res.verdict === 'correct' ? '#58f898' : (res.verdict === 'partial' ? '#f8d048' : '#ff8080');
+              if (outEl) {
+                outEl.style.color = col;
+                outEl.innerHTML = `<strong>DeBERTa-v3 Verdict: ${escHtml((res.verdict || '').toUpperCase())} (${pct}%)</strong> in ${res.grader_latency_ms || 12}ms &mdash; DKT C${p.concept_id} Mastery Updated!`;
+              }
+              if (res.verdict === 'correct') Sfx.statUp();
+            } catch (e) {
+              if (outEl) outEl.textContent = 'Start server.py to grade live with DeBERTa-v3!';
+            }
+            vqaSubBtn.disabled = false;
+            vqaSubBtn.textContent = 'GRADE VQA';
+          };
+        }
         const nextBtn = scr.querySelector('#dino-next-btn');
         if (nextBtn) {
           nextBtn.onclick = () => {

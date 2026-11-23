@@ -3,7 +3,7 @@
 Thumbs.db
 desktop.ini
 
-# logs / scratch
+# logs / scratch / backups
 *.log
 *.bak
 .t*.png
@@ -12,23 +12,27 @@ desktop.ini
 # deploy
 .vercel
 
-# python / ml
+# python / venv / bytecode
 .venv/
 __pycache__/
+*.pyc
 
-# Raw third-party asset folders (Pokemon Void / FireRed sheets) — unknown
-# redistribution license and not used at runtime; extracted game art lives in assets/
-Audio/
-Graphics/
-PBS/
-GLCache/
-Fonts/
-NewAssets/
+# Agent instructions (local only)
+AGENTS.md
+CLAUDE.md
 
-# Large datasets (> GitHub 100 MB limit) — re-download via the dataset scripts
-Models/DKT/data/
-Models/AnswerEvaluator/data/
+# Raw third-party asset folders (root only)
+/Audio/
+/Graphics/
+/PBS/
+/GLCache/
+/Fonts/
+/NewAssets/
 
-# Large model weights (> GitHub 100 MB limit) — regenerate via train/download scripts
+# Large datasets (> GitHub 100 MB limit)
+Models/DKT/data/*.csv
+Models/DKT/data/2012-2013-data-with-predictions-4-final.zip
+
+# Large model weights (> GitHub 100 MB limit)
 Models/AnswerEvaluator/checkpoints/*.pt
-Models/GroundingDINO/checkpoints/
+Models/GroundingDINO/checkpoints/grounding_dino_tiny/model.safetensors

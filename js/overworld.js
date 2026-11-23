@@ -438,19 +438,20 @@ const Overworld = (() => {
   async function startMenu() {
     Sfx.select();
     while (true) {
-      const pick = await UI.choose(['JOURNAL', 'DINO LAB', 'PARTY', 'BAG', 'BADGES', 'SAVE', 'EXIT'], {
+      const pick = await UI.choose(['JOURNAL', 'DINO LAB', 'NEW COURSE', 'PARTY', 'BAG', 'BADGES', 'SAVE', 'EXIT'], {
         style: { right: '12px', top: '12px' },
       });
-      if (pick === -1 || pick === 6) return;
-      if (pick === 0) await UI.questScreen();
+      if (pick === -1 || pick === 7) return;
+      if (pick === 0) await UI.questScreen(0);
       if (pick === 1) await UI.dinoDiagramScreen();
-      if (pick === 2) await partyManage();
-      if (pick === 3) await overworldBag();
-      if (pick === 4) {
+      if (pick === 2) await UI.questScreen(2);
+      if (pick === 3) await partyManage();
+      if (pick === 4) await overworldBag();
+      if (pick === 5) {
         const b = Game.player.badges;
         await UI.say(b.length ? `BADGES: ${b.join(', ')}` : 'You have no badges yet. The STONEGATE gym awaits!');
       }
-      if (pick === 5) {
+      if (pick === 6) {
         const s = await UI.choose(['SAVE TO BROWSER', 'GET SAVE CODE', 'CANCEL'], {
           style: { right: '12px', top: '12px' },
         });

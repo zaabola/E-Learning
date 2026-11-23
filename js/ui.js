@@ -1087,10 +1087,10 @@ const UI = (() => {
   }
 
   // ----- KnowledgeQuest 3-Tab AI Field Journal & Study Hub -----
-  async function questScreen() {
+  async function questScreen(initialTab = 0) {
     if (typeof AITutor !== 'undefined') await AITutor.refreshStatus();
     return new Promise((resolve) => {
-      let tab = 0; // 0: Mastery & Affect, 1: Study Notes (YOLO/OCR), 2: AI Lab & Course
+      let tab = Number(initialTab) || 0; // 0: Mastery & Affect, 1: Study Notes, 2: AI Lab & New Course
       let selConcept = 0;
       let unsub = null;
 
@@ -1634,6 +1634,7 @@ const UI = (() => {
               <div style="display:flex;align-items:center;gap:6px">
                 <span class="ai-dot ${live ? '' : 'offline'}"></span>
                 <span style="font-size:7.5px;color:${live ? '#78f098' : '#f8b848'}">${live ? 'QWEN-VL + DINO + DeBERTa (CUDA)' : 'OFFLINE CACHE'}</span>
+                <button type="button" class="ai-btn-mini" id="dino-new-course-btn" style="border-color:#58f898;color:#58f898">+ NEW COURSE</button>
                 <button type="button" class="ai-btn-mini" id="dino-next-btn">NEXT PUZZLE &rarr;</button>
                 <button type="button" class="ai-btn-mini" id="dino-close-btn">&#10005; EXIT</button>
               </div>
@@ -1663,6 +1664,15 @@ const UI = (() => {
 
         const closeBtn = scr.querySelector('#dino-close-btn');
         if (closeBtn) closeBtn.onclick = closeScreen;
+        const newCourseBtn = scr.querySelector('#dino-new-course-btn');
+        if (newCourseBtn) {
+          newCourseBtn.onclick = async () => {
+            if (unsub) { unsub(); unsub = null; }
+            scr.remove();
+            await questScreen(2);
+            resolve();
+          };
+        }
         const vqaFillBtn = scr.querySelector('#dino-vqa-fill');
         if (vqaFillBtn) {
           vqaFillBtn.onclick = () => {

@@ -651,10 +651,12 @@ def ingest_custom_course_package(
                     f"  [{vlm_name} LIVE] Concept C{slot_idx} | Page {cand['page']} ({cand['slide_title']})...",
                     flush=True,
                 )
+                s_title = (cand["slide_title"] or "").strip()
+                c_hint = s_title if (s_title and s_title.lower() in course_title.lower()) else (f"{course_title} — {s_title}" if s_title else course_title)
                 vlm_res = vlm_engine.comprehend_diagram_live(
                     image_path=cand["abs_path"],
                     concept_id=slot_idx,
-                    concept_title=f"{course_title} — {cand['slide_title']}",
+                    concept_title=c_hint,
                     slide_context=cand["slide_text"],
                     use_reference_cache=False,  # CRITICAL: NEVER mix old YOLO/OCR cache!
                 )

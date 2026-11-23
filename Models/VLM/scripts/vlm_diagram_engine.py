@@ -55,38 +55,36 @@ VLM_CKPT_DIR = os.path.join(VLM_ROOT, "checkpoints", "qwen_vl_7b")
 VLM_SYSTEM_PROMPT = (
     "You are an expert University Professor and Multimodal Curriculum Architect. "
     "Inspect ONLY the provided technical slide/diagram image and its slide text context. "
-    "Write questions and labels in the SAME language as the slide (French if the slide is in French, English if in English). "
-    "CRITICAL: For `target_label`, copy the EXACT verbatim text printed inside the diagram (e.g. 'DBWn', 'Cache de tampons de la base de données', 'Assurer la sauvegarde') — NEVER translate printed diagram labels into another language! "
-    "For `bbox_2d`, always enclose the ENTIRE box, rectangle, oval, cloud, or container shape holding `target_label` (all wrapped text lines + outer border, not just one word). "
-    "Return ONLY a valid JSON object with this exact schema:\n"
+    "Write questions and summaries in the SAME language as the slide (French if the slide is in French, English if in English). "
+    "CRITICAL: For each component's `target_label`, copy the EXACT verbatim text printed inside a visible box, cloud, oval, or table row in THIS image (e.g. 'DBWn', 'Cache de tampons de la base de données', 'DBA') — NEVER translate printed labels and NEVER use placeholder words! "
+    "Keep every string concise (1 short sentence). Return ONLY a valid JSON object matching this schema:\n"
     "{\n"
     '  "is_educational_diagram": true,\n'
-    '  "concept_title": "Short exact academic concept title from this diagram",\n'
-    '  "visual_summary": "2-sentence technical explanation of what this specific diagram shows",\n'
-    '  "extracted_labels": ["verbatim label 1 visible in image", "verbatim label 2 visible in image", "verbatim label 3"],\n'
-    '  "summary_bullets": ["Key fact 1 from diagram/slide", "Key fact 2", "Key fact 3"],\n'
+    '  "concept_title": "Short exact concept title from this diagram",\n'
+    '  "visual_summary": "1-2 concise sentences explaining what this diagram shows",\n'
+    '  "summary_bullets": ["Key fact 1", "Key fact 2", "Key fact 3"],\n'
     '  "components": [\n'
     "    {\n"
-    '      "target_label": "EXACT verbatim text label printed inside THIS image",\n'
-    '      "dino_prompt": "short visual description of this component box in English ending with a period.",\n'
-    '      "bbox_2d": [x1, y1, x2, y2],\n'
-    '      "lab_question": "Click or drag a box around [target_label] shown in this figure.",\n'
-    '      "socratic_hint": "1-sentence visual hint pointing to where it is on the figure",\n'
-    '      "explanation": "1-sentence explanation of what this component does"\n'
+    '      "target_label": "EXACT verbatim printed text of component 1 in image",\n'
+    '      "dino_prompt": "short English visual description of component 1 container ending with a period.",\n'
+    '      "explanation": "1 concise sentence explaining what component 1 does"\n'
+    "    },\n"
+    "    {\n"
+    '      "target_label": "EXACT verbatim printed text of component 2 in image",\n'
+    '      "dino_prompt": "short English visual description of component 2 container ending with a period.",\n'
+    '      "explanation": "1 concise sentence explaining what component 2 does"\n'
     "    }\n"
     "  ],\n"
     '  "mc_questions": [\n'
     "    {\n"
-    '      "question": "Specific multiple-choice question about THIS diagram/slide",\n'
-    '      "choices": ["Correct answer", "Plausible wrong option 1", "Plausible wrong option 2", "Plausible wrong option 3"],\n'
+    '      "question": "Specific multiple-choice question about THIS diagram",\n'
+    '      "choices": ["Correct answer", "Wrong option 1", "Wrong option 2", "Wrong option 3"],\n'
     '      "correct_idx": 0\n'
     "    }\n"
     "  ],\n"
     '  "vqa_challenge": {\n'
     '    "question": "1 crisp analytical question strictly about THIS diagram",\n'
-    '    "reference_answer": "1 concise 15-25 word ground-truth answer",\n'
-    '    "sample_correct_answer": "Example accurate student paraphrase",\n'
-    '    "misconception_trap_answer": "Plausible false answer contradicting the diagram"\n'
+    '    "reference_answer": "1 concise 15-25 word ground-truth answer"\n'
     "  }\n"
     "}"
 )
@@ -115,18 +113,106 @@ def compute_iou(box_a, box_b) -> float:
     return float(inter / union) if union > 1e-6 else 0.0
 
 
+def _repair_truncated_json(text: str) -> str:
+    """Repairs trailing commas and unclosed strings/brackets/braces in a truncated JSON string."""
+    s = re.sub(r",\s*([}\]])", r"\1", text.strip())
+    in_str = False
+    esc = False
+    stack = []
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                stack.append("}")
+            elif ch == "[":
+                stack.append("]")
+            elif ch in ("}", "]") and stack and stack[-1] == ch:
+                stack.pop()
+    if in_str:
+        s += '"'
+    s = re.sub(r",\s*$", "", s.rstrip())
+    if stack:
+        s += "".join(reversed(stack))
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+    return s
+
+
 def extract_json_payload(raw_text: str) -> dict:
-    """Extracts and parses a JSON object from raw VLM output (handles markdown code fences)."""
+    """
+    Extracts and parses a JSON object from raw VLM output, automatically recovering
+    from markdown fences, trailing commas, or slightly truncated responses.
+    """
     cleaned = raw_text.strip()
-    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.DOTALL)
+    fence_match = re.search(r"```(?:json)?\s*(\{.*)", cleaned, flags=re.DOTALL)
     if fence_match:
         cleaned = fence_match.group(1)
+        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
     else:
         start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            cleaned = cleaned[start : end + 1]
-    return json.loads(cleaned)
+        if start != -1:
+            cleaned = cleaned[start:]
+
+    end = cleaned.rfind("}")
+    if end != -1:
+        candidate = cleaned[: end + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            try:
+                return json.loads(re.sub(r",\s*([}\]])", r"\1", candidate))
+            except Exception:
+                pass
+
+    # Attempt structural repair if truncated mid-object
+    try:
+        return json.loads(_repair_truncated_json(cleaned))
+    except Exception:
+        pass
+
+    # Final resilient regex recovery for key fields so labels & VQA are never lost
+    recovered = {}
+    m_edu = re.search(r'"is_educational_diagram"\s*:\s*(true|false)', cleaned, flags=re.IGNORECASE)
+    if m_edu:
+        recovered["is_educational_diagram"] = m_edu.group(1).lower() == "true"
+    m_title = re.search(r'"concept_title"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', cleaned)
+    if m_title:
+        recovered["concept_title"] = m_title.group(1)
+    m_sum = re.search(r'"visual_summary"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', cleaned)
+    if m_sum:
+        recovered["visual_summary"] = m_sum.group(1)
+
+    labels = re.findall(r'"target_label"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', cleaned)
+    prompts = re.findall(r'"dino_prompt"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', cleaned)
+    expls = re.findall(r'"explanation"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', cleaned)
+    if labels:
+        recovered["components"] = [
+            {
+                "target_label": labels[i],
+                "dino_prompt": prompts[i] if i < len(prompts) else f"{labels[i].lower()} diagram box.",
+                "explanation": expls[i] if i < len(expls) else recovered.get("visual_summary", ""),
+            }
+            for i in range(min(2, len(labels)))
+        ]
+    vqa_m = re.search(r'"vqa_challenge"\s*:\s*\{([^}]*)', cleaned, flags=re.DOTALL)
+    if vqa_m:
+        vq = re.search(r'"question"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', vqa_m.group(1))
+        vr = re.search(r'"reference_answer"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', vqa_m.group(1))
+        if vq:
+            recovered["vqa_challenge"] = {
+                "question": vq.group(1),
+                "reference_answer": vr.group(1) if vr else recovered.get("visual_summary", ""),
+            }
+    if recovered:
+        return recovered
+    raise ValueError("Unable to parse JSON payload from VLM output")
 
 
 class QwenVLDiagramEngine:
@@ -566,7 +652,7 @@ class QwenVLDiagramEngine:
         concept_id: int = 0,
         concept_title: str = "",
         slide_context: str = "",
-        max_new_tokens: int = 640,
+        max_new_tokens: int = 950,
         use_reference_cache: bool = False,
     ) -> dict:
         """
@@ -659,7 +745,11 @@ class QwenVLDiagramEngine:
         ref_diag = self.diagrams_by_concept.get(int(concept_id), {}) if use_reference_cache else {}
         try:
             parsed = extract_json_payload(raw_output)
-        except Exception:
+        except Exception as parse_exc:
+            print(
+                f"  [{self.short_model_name} PASS-1 WARN] JSON parse failed ({parse_exc}); raw[:240]={raw_output[:240]!r}",
+                flush=True,
+            )
             parsed = dict(ref_diag) if use_reference_cache else {}
 
         parsed.setdefault("is_educational_diagram", True)
@@ -768,7 +858,11 @@ class QwenVLDiagramEngine:
                 round(px_box[2] * 1000.0 / max(1.0, float(width))),
                 round(px_box[3] * 1000.0 / max(1.0, float(height))),
             ]
-            lab_q_final = lc.get("lab_question") or rc.get("lab_question") or f"Click or drag a box around [{t_label}] shown in this figure."
+            raw_lab_q = (rc.get("lab_question") if use_reference_cache else None) or lc.get("lab_question") or ""
+            if (not use_reference_cache) or (not raw_lab_q) or ("[target_label]" in raw_lab_q.lower()) or ("target_label" in raw_lab_q.lower()):
+                lab_q_final = f"Click or drag a box around '{t_label}' shown in this figure."
+            else:
+                lab_q_final = raw_lab_q
             comp_item = {
                 "component_id": rc.get("component_id", f"c{concept_id}_p{idx + 1}"),
                 "target_label": str(t_label),
@@ -778,7 +872,7 @@ class QwenVLDiagramEngine:
                 "vlm_box_px": px_box,
                 "ground_truth_box_px": rc.get("ground_truth_box_px", px_box) if use_reference_cache else px_box,
                 "lab_question": lab_q_final,
-                "socratic_hint": lc.get("socratic_hint") or rc.get("socratic_hint") or f"Look closely for the [{t_label}] region in this figure.",
+                "socratic_hint": lc.get("socratic_hint") or rc.get("socratic_hint") or f"Look closely for '{t_label}' in this figure.",
                 "explanation": lc.get("explanation") or rc.get("explanation") or parsed["visual_summary"],
             }
             normalized_comps.append(comp_item)

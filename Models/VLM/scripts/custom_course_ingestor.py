@@ -355,6 +355,7 @@ def ingest_custom_course_package(
     remote_vlm_url: str = None,
     vlm_engine=None,
     dino_evaluator=None,
+    progress_cb=None,
 ) -> dict:
     """
     End-to-end ingestion of a PDF, PPTX, DOCX (Word), or Image file into the RPG:
@@ -365,6 +366,14 @@ def ingest_custom_course_package(
       3. Runs live Grounding DINO zero-shot detection on each extracted photo to localize
          the clickable `[x1, y1, x2, y2]` component boxes.
     """
+    def _report(pct: int, msg: str):
+        if progress_cb:
+            try:
+                progress_cb(pct, msg)
+            except Exception:
+                pass
+
+    _report(8, f"Parsing '{file_name or course_title}' & extracting embedded photos...")
     if not course_title or course_title.strip().lower() in ("", "custom ai course"):
         if file_name:
             base = os.path.splitext(os.path.basename(file_name))[0]
@@ -419,7 +428,16 @@ def ingest_custom_course_package(
     new_dino_puzzles = []
     new_vlm_diagrams = []
 
+    _report(
+        18,
+        f"Extracted {doc_info['num_photos_extracted']} photos & {len(doc_info['text_sections'])} sections. Starting Qwen2.5-VL-7B inspection...",
+    )
+
     for cid in range(5):
+        _report(
+            22 + cid * 15,
+            f"Qwen2.5-VL-7B & Grounding DINO analyzing Concept {cid + 1}/5...",
+        )
         c_title, c_desc = parsed_pairs[cid]
         short_title = c_title.split(":")[0].strip()[:22]
 

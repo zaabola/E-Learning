@@ -22,9 +22,10 @@ import mimetypes
 import os
 import sys
 import threading
+import uuid
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -52,6 +53,7 @@ class GameServerState:
         self.lock = threading.Lock()
         self.engine = KnowledgeQuestAIEngine(vlm_mode=vlm_mode, vlm_model_id=vlm_model_id)
         self.session = self.engine.create_session(profile=default_profile, course_id=default_course)
+        self.ingest_jobs = {}
 
     def reset_session(self, course_id: str = 'vision_yolo_ocr', profile: str = 'average') -> dict:
         with self.lock:
@@ -82,11 +84,14 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
 
     def _send_json(self, payload: dict, status: int = 200):
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def _read_json_body(self) -> dict:
         length = int(self.headers.get('Content-Length', '0') or '0')
@@ -100,7 +105,8 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        route = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        route = parsed.path
         if route == '/api/status':
             st = self.server_state
             with st.lock:
@@ -112,6 +118,16 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
             with st.lock:
                 puzzles = st.session.get_diagram_puzzles()
             self._send_json({'puzzles': puzzles})
+            return
+        if route == '/api/course/ingest/status':
+            st = self.server_state
+            qs = parse_qs(parsed.query)
+            job_id = (qs.get('job_id') or [''])[0]
+            job = st.ingest_jobs.get(job_id)
+            if not job:
+                self._send_json({'error': f'Unknown ingest job_id: {job_id}'}, status=404)
+                return
+            self._send_json(job)
             return
         super().do_GET()
 
@@ -249,30 +265,68 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
             file_base64 = body.get('file_base64', None)
             remote_vlm_url = body.get('remote_vlm_url', None)
             profile = str(body.get('profile', 'average'))
-            with st.lock:
-                st.session, pkg = st.engine.ingest_new_course(
-                    course_title=course_title,
-                    raw_notes=raw_notes,
-                    image_base64=image_base64,
-                    file_name=file_name,
-                    file_base64=file_base64,
-                    remote_vlm_url=remote_vlm_url,
-                    profile=profile,
-                )
-                snap = st.session.get_status_snapshot()
-                puzzles = st.session.get_diagram_puzzles()
-            print(
-                f"  [NEW COURSE INGESTED] '{pkg['title']}' (`{pkg['course_id']}`) | "
-                f"Source='{pkg.get('source_file', 'notes')}' | "
-                f"{pkg.get('num_photos_extracted', 0)} Extracted Photos + {len(puzzles)} VLM/DINO Puzzles!"
-            )
-            self._send_json({
-                'status': snap,
-                'puzzles': puzzles,
-                'course_id': pkg['course_id'],
-                'num_photos_extracted': pkg.get('num_photos_extracted', 0),
-                'source_file': pkg.get('source_file', ''),
-            })
+
+            job_id = uuid.uuid4().hex[:12]
+            st.ingest_jobs[job_id] = {
+                'job_id': job_id,
+                'job_status': 'running',
+                'progress': 5,
+                'step': f"Received '{file_name or course_title}'. Starting VLM + Document Extraction...",
+            }
+
+            def _run_ingest_worker():
+                def _on_prog(pct, msg):
+                    st.ingest_jobs[job_id]['progress'] = int(pct)
+                    st.ingest_jobs[job_id]['step'] = str(msg)
+
+                try:
+                    with st.lock:
+                        st.session, pkg = st.engine.ingest_new_course(
+                            course_title=course_title,
+                            raw_notes=raw_notes,
+                            image_base64=image_base64,
+                            file_name=file_name,
+                            file_base64=file_base64,
+                            remote_vlm_url=remote_vlm_url,
+                            profile=profile,
+                            progress_cb=_on_prog,
+                        )
+                        snap = st.session.get_status_snapshot()
+                        puzzles = st.session.get_diagram_puzzles()
+
+                    print(
+                        f"  [NEW COURSE INGESTED] '{pkg['title']}' (`{pkg['course_id']}`) | "
+                        f"Source='{pkg.get('source_file', 'notes')}' | "
+                        f"{pkg.get('num_photos_extracted', 0)} Extracted Photos + {len(puzzles)} VLM/DINO Puzzles!",
+                        flush=True,
+                    )
+                    st.ingest_jobs[job_id] = {
+                        'job_id': job_id,
+                        'job_status': 'done',
+                        'progress': 100,
+                        'step': (
+                            f"Ready! Extracted {pkg.get('num_photos_extracted', 0)} photos & "
+                            f"{len(puzzles)} VLM/Grounding-DINO puzzles from '{pkg['title']}'."
+                        ),
+                        'status': snap,
+                        'puzzles': puzzles,
+                        'course_id': pkg['course_id'],
+                        'course_title': pkg['title'],
+                        'num_photos_extracted': pkg.get('num_photos_extracted', 0),
+                        'source_file': pkg.get('source_file', ''),
+                    }
+                except Exception as exc:
+                    print(f"  [INGEST ERROR] job={job_id}: {exc}", flush=True)
+                    st.ingest_jobs[job_id] = {
+                        'job_id': job_id,
+                        'job_status': 'error',
+                        'progress': 0,
+                        'step': f'Ingestion failed: {exc}',
+                        'error': str(exc),
+                    }
+
+            threading.Thread(target=_run_ingest_worker, daemon=True).start()
+            self._send_json(st.ingest_jobs[job_id], status=202)
             return
 
         self._send_json({'error': f'Unknown API route: {route}'}, status=404)

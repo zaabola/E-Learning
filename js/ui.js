@@ -1363,14 +1363,19 @@ const UI = (() => {
               });
             }
             try {
-              const res = await AITutor.ingestCustomCourse({
-                courseTitle: titleVal,
-                rawNotes: notesVal,
-                fileName,
-                fileBase64: fileB64,
-                imageBase64: fileB64,
-                profile: 'average',
-              });
+              const res = await AITutor.ingestCustomCourse(
+                {
+                  courseTitle: titleVal,
+                  rawNotes: notesVal,
+                  fileName,
+                  fileBase64: fileB64,
+                  imageBase64: fileB64,
+                  profile: 'average',
+                },
+                (pct, stepMsg) => {
+                  ingestBtn.textContent = `${pct}% — ${stepMsg}`;
+                }
+              );
               const nPhotos = (res && res.num_photos_extracted) || 0;
               toast(nPhotos > 0
                 ? `VLM extracted ${nPhotos} photos & 5 concepts from "${fileName}"!`
@@ -1787,11 +1792,185 @@ const UI = (() => {
     });
   }
 
+  // ----- Title Screen Course Upload Gate (NEW GAME unlocks only after course upload completes) -----
+  function titleCourseMenu({ hasSave = false } = {}) {
+    return new Promise((resolve) => {
+      let uploadedCourse = (typeof AITutor !== 'undefined' && AITutor.getUploadedCourse)
+        ? AITutor.getUploadedCourse()
+        : null;
+      let uploading = false;
+      let progressPct = uploadedCourse ? 100 : 0;
+      let progressStep = uploadedCourse
+        ? `Ready! "${uploadedCourse.course_title}" (${uploadedCourse.num_photos_extracted || 0} photos extracted)`
+        : 'Insert a PDF, PPTX, Word (.docx), or slide image to unlock NEW GAME.';
+      let errorMsg = '';
+
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:absolute;inset:0;pointer-events:auto;z-index:20;';
+      menuLayer.appendChild(wrap);
+
+      function done(result) {
+        wrap.remove();
+        Input.clearPressed();
+        resolve(result);
+      }
+
+      function render() {
+        const unlocked = Boolean(uploadedCourse && !uploading);
+        wrap.innerHTML = `
+          <div style="position:absolute;left:16px;bottom:42px;width:210px;background:rgba(12,20,34,0.95);border:3px solid #f0e8d0;border-radius:8px;padding:10px;box-shadow:0 6px 18px rgba(0,0,0,0.6)">
+            <div style="font-size:8px;color:#f8d048;margin-bottom:8px;text-align:center">MAIN MENU</div>
+            ${hasSave ? '<button type="button" id="ts-continue" class="ai-btn-primary" style="width:100%;margin-bottom:7px;background:#2a4870;border-color:#78b8f8">CONTINUE</button>' : ''}
+            <button type="button" id="ts-newgame" class="ai-btn-primary" ${unlocked ? '' : 'disabled'} style="width:100%;margin-bottom:7px;${unlocked ? 'background:#1d6b42;border-color:#58f898;color:#fff;cursor:pointer;box-shadow:0 0 12px rgba(88,248,152,0.45)' : 'background:#222c3c;border-color:#445268;color:#7888a0;opacity:0.58;cursor:not-allowed'}">
+              ${unlocked ? '&#9654; NEW GAME' : '&#128274; NEW GAME'}
+            </button>
+            <button type="button" id="ts-import" class="ai-btn-mini" style="width:100%;padding:6px 8px">IMPORT CODE</button>
+            <div style="font-family:var(--dialog-font);font-size:13.5px;color:${unlocked ? '#78f8a8' : '#b8c8dc'};margin-top:6px;line-height:1.2;text-align:center">
+              ${unlocked ? 'Course verified! Click NEW GAME to begin.' : 'Upload a course on the right to unlock NEW GAME.'}
+            </div>
+          </div>
+
+          <div style="position:absolute;right:16px;bottom:42px;width:448px;background:rgba(12,20,34,0.95);border:3px solid ${unlocked ? '#58f898' : '#58a8f8'};border-radius:8px;padding:10px 12px;box-shadow:0 6px 18px rgba(0,0,0,0.6)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <span style="font-size:8.5px;color:${unlocked ? '#58f898' : '#68c8ff'}">&#128218; INSERT COURSE (PDF / PPTX / WORD)</span>
+              <span style="font-size:7.5px;color:#f8d048">QWEN2.5-VL-7B + DINO</span>
+            </div>
+            <div style="background:#09111c;border:1px dashed #4a82bc;border-radius:5px;padding:6px 8px;margin-bottom:6px">
+              <input type="file" id="ts-course-file" accept=".pdf,.pptx,.ppt,.docx,.doc,image/*" ${uploading ? 'disabled' : ''} style="width:100%;font-size:11.5px;color:#dce8f6;cursor:pointer" />
+            </div>
+            <div style="display:flex;gap:6px;margin-bottom:6px">
+              <input type="text" id="ts-course-title" ${uploading ? 'disabled' : ''} value="${escHtml((uploadedCourse && uploadedCourse.course_title) || '')}" placeholder="Course Title (auto-filled from file name)" style="flex:1;background:#09111c;color:#fff;border:1px solid #35547a;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:15px" />
+              <button type="button" id="ts-upload-btn" class="ai-btn-primary" ${uploading ? 'disabled' : ''} style="width:auto;padding:5px 12px;white-space:nowrap">
+                ${uploading ? 'ANALYZING...' : (unlocked ? 'RE-UPLOAD' : '&#9889; UPLOAD')}
+              </button>
+            </div>
+            <div style="background:#0a1220;border:1px solid #2b4464;border-radius:4px;height:12px;overflow:hidden;margin-bottom:5px">
+              <div id="ts-prog-bar" style="height:100%;width:${progressPct}%;background:${unlocked ? '#38e888' : '#48a0f8'};transition:width 0.35s ease"></div>
+            </div>
+            <div id="ts-prog-text" style="font-family:var(--dialog-font);font-size:14.5px;color:${errorMsg ? '#ff8888' : (unlocked ? '#78f8a8' : '#b8d4f0')};line-height:1.25">
+              ${escHtml(errorMsg || progressStep)}
+            </div>
+          </div>
+        `;
+
+        const contBtn = wrap.querySelector('#ts-continue');
+        if (contBtn) {
+          contBtn.onclick = () => { Sfx.select(); done({ action: 'CONTINUE' }); };
+        }
+        const impBtn = wrap.querySelector('#ts-import');
+        if (impBtn) {
+          impBtn.onclick = () => { Sfx.select(); done({ action: 'IMPORT CODE' }); };
+        }
+        const newBtn = wrap.querySelector('#ts-newgame');
+        if (newBtn) {
+          newBtn.onclick = () => {
+            if (!unlocked) {
+              Sfx.statDown();
+              toast('Insert a course and wait for upload to complete first!');
+              return;
+            }
+            Sfx.select();
+            done({ action: 'NEW GAME', course: uploadedCourse });
+          };
+        }
+
+        const fileEl = wrap.querySelector('#ts-course-file');
+        const titleEl = wrap.querySelector('#ts-course-title');
+        if (fileEl) {
+          fileEl.onchange = () => {
+            if (fileEl.files && fileEl.files[0] && titleEl && !titleEl.value.trim()) {
+              titleEl.value = fileEl.files[0].name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+            }
+          };
+        }
+
+        const upBtn = wrap.querySelector('#ts-upload-btn');
+        if (upBtn) {
+          upBtn.onclick = async () => {
+            if (uploading) return;
+            const hasFile = Boolean(fileEl && fileEl.files && fileEl.files[0]);
+            if (!hasFile) {
+              errorMsg = 'Please select a .pdf, .pptx, .docx, or image file first!';
+              Sfx.statDown();
+              render();
+              return;
+            }
+            const fileObj = fileEl.files[0];
+            const fileName = fileObj.name;
+            const titleVal = (titleEl && titleEl.value.trim()) || fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+
+            uploading = true;
+            uploadedCourse = null;
+            errorMsg = '';
+            progressPct = 4;
+            progressStep = `Reading '${fileName}' and uploading to Kaggle GPU server...`;
+            Sfx.select();
+            render();
+
+            const fileB64 = await new Promise((resB64) => {
+              const reader = new FileReader();
+              reader.onload = () => resB64(reader.result);
+              reader.onerror = () => resB64(null);
+              reader.readAsDataURL(fileObj);
+            });
+
+            if (!fileB64) {
+              uploading = false;
+              errorMsg = 'Failed to read selected file.';
+              progressPct = 0;
+              render();
+              return;
+            }
+
+            try {
+              const res = await AITutor.ingestCustomCourse(
+                {
+                  courseTitle: titleVal,
+                  rawNotes: '',
+                  fileName,
+                  fileBase64: fileB64,
+                  profile: 'average',
+                },
+                (pct, stepMsg) => {
+                  progressPct = Math.max(progressPct, Number(pct) || 10);
+                  progressStep = stepMsg || 'Analyzing with Qwen2.5-VL-7B...';
+                  const bar = wrap.querySelector('#ts-prog-bar');
+                  const txt = wrap.querySelector('#ts-prog-text');
+                  if (bar) bar.style.width = `${progressPct}%`;
+                  if (txt) txt.textContent = `${progressPct}% — ${progressStep}`;
+                }
+              );
+              uploading = false;
+              progressPct = 100;
+              uploadedCourse = {
+                course_id: res.course_id,
+                course_title: res.course_title || titleVal,
+                num_photos_extracted: res.num_photos_extracted || 0,
+                source_file: res.source_file || fileName,
+              };
+              progressStep = `Course ready! "${uploadedCourse.course_title}" (${uploadedCourse.num_photos_extracted} extracted photos & 10 VLM/DINO puzzles).`;
+              Sfx.statUp();
+              render();
+            } catch (err) {
+              uploading = false;
+              progressPct = 0;
+              errorMsg = `Upload error: ${err && err.message ? err.message : 'Check server connection.'}`;
+              Sfx.statDown();
+              render();
+            }
+          };
+        }
+      }
+
+      render();
+    });
+  }
+
   return {
     init, say, sayLines, setPrompt, hideDialog, choose, yesNo, toast,
     fadeOut, fadeIn, flashScreen,
     setBox, setStatusChip, setEnemyBalls, hideBoxes, setBattleAiPill, animateHp, animateExp,
     moveMenu, partyScreen, bagScreen, shopScreen, starterChoice,
-    saveModal, importModal, askEncounterModal, questScreen, dinoDiagramScreen,
+    saveModal, importModal, askEncounterModal, questScreen, dinoDiagramScreen, titleCourseMenu,
   };
 })();

@@ -91,24 +91,18 @@ function drawTitle(ctx, ts) {
 async function titleFlow() {
   Game.mode = 'title';
   while (true) {
-    const opts = [];
-    if (SaveSys.hasLocal()) opts.push('CONTINUE');
-    opts.push('NEW GAME', 'IMPORT CODE');
-    const pick = await UI.choose(opts, {
-      canCancel: false,
-      style: { left: '20px', bottom: '120px', minWidth: '178px' },
-    });
-    const label = opts[pick];
+    const res = await UI.titleCourseMenu({ hasSave: SaveSys.hasLocal() });
+    const label = res && res.action;
 
     if (label === 'NEW GAME') {
       Game.player = newPlayer();
-      await enterWorld(true);
+      await enterWorld(true, res.course || null);
       return;
     }
     if (label === 'CONTINUE') {
       try {
         SaveSys.fromLocal();
-        await enterWorld(false);
+        await enterWorld(false, null);
         return;
       } catch (e) {
         UI.toast('Save data is corrupted!');
@@ -120,7 +114,7 @@ async function titleFlow() {
       try {
         SaveSys.fromCode(code);
         UI.toast('Save loaded!');
-        await enterWorld(false);
+        await enterWorld(false, null);
         return;
       } catch (e) {
         UI.toast('Invalid save code!');
@@ -129,12 +123,21 @@ async function titleFlow() {
   }
 }
 
-async function enterWorld(isNew) {
+async function enterWorld(isNew, uploadedCourse = null) {
   Game.busy = true;
   try {
+    let courseTitle = 'your uploaded course';
     if (typeof AITutor !== 'undefined') {
-      if (isNew) AITutor.resetSession('vision_yolo_ocr', 'average');
-      else AITutor.syncFromPlayerSave();
+      if (isNew) {
+        if (uploadedCourse && uploadedCourse.course_id) {
+          courseTitle = uploadedCourse.course_title || uploadedCourse.course_id;
+          await AITutor.refreshStatus();
+        } else {
+          await AITutor.resetSession('vision_yolo_ocr', 'average');
+        }
+      } else {
+        await AITutor.syncFromPlayerSave();
+      }
     }
     await UI.fadeOut(350);
     Game.mode = 'overworld';
@@ -142,8 +145,8 @@ async function enterWorld(isNew) {
     if (isNew) {
       await UI.sayLines([
         'Morning light spills through your bedroom window in WILLOWBROOK...',
-        'Today your Computer Vision KnowledgeQuest begins at Professor ADA\'s Lab!',
-        'Press ENTER -> JOURNAL anytime to read your YOLO & OCR Study Notes or listen to 15s Podcast Hints.',
+        `Today your adaptive learning adventure on "${courseTitle}" begins at Professor ADA's Lab!`,
+        'Press ENTER -> DINO LAB to inspect the extracted photos from your course, or JOURNAL for Study Notes!',
         '(ARROWS/WASD: move   Z: talk/confirm   X: back   ENTER: menu   M: sound)',
       ]);
     }

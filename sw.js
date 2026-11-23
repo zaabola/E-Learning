@@ -1,6 +1,6 @@
 // Simple cache-first service worker so the installed PWA runs offline.
 // Live `/api/` calls and local dev localhost bypass cache so AI telemetry stays real-time.
-const CACHE = 'firered-kq-v3';
+const CACHE = 'firered-kq-v4';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
@@ -14,7 +14,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const u = e.request.url || '';
-  if (u.includes('/api/') || u.includes('127.0.0.1') || u.includes('localhost')) return;
+  if (u.includes('/api/') || u.includes('127.0.0.1') || u.includes('localhost') || u.includes('trycloudflare.com')) return;
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const hit = await cache.match(e.request);

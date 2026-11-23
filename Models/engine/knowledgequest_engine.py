@@ -228,6 +228,7 @@ class KnowledgeQuestAIEngine:
         file_base64: str = None,
         remote_vlm_url: str = None,
         profile: str = 'average',
+        progress_cb=None,
     ):
         pkg = ingest_custom_course_package(
             course_title=course_title,
@@ -238,6 +239,7 @@ class KnowledgeQuestAIEngine:
             remote_vlm_url=remote_vlm_url,
             vlm_engine=self.vlm_engine,
             dino_evaluator=self.dino_evaluator,
+            progress_cb=progress_cb,
         )
         return self.create_session(profile=profile, course_id=pkg['course_id']), pkg
 

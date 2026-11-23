@@ -454,31 +454,60 @@ const AITutor = (() => {
     return statusCache;
   }
 
-  async function ingestCustomCourse(payload = {}) {
+  let uploadedCourseInfo = null;
+
+  async function ingestCustomCourse(payload = {}, onProgress = null) {
     visionPuzzlesCache = null;
-    try {
-      const data = await apiFetch('/api/course/ingest', {
-        method: 'POST',
-        body: JSON.stringify({
-          course_title: payload.courseTitle || '',
-          raw_notes: payload.rawNotes || '',
-          image_base64: payload.imageBase64 || null,
-          file_name: payload.fileName || null,
-          file_base64: payload.fileBase64 || null,
-          remote_vlm_url: payload.remoteVlmUrl || null,
-          profile: payload.profile || 'average',
-        }),
-      }, 180000);
-      online = true;
-      statusCache = data.status;
-      if (Array.isArray(data.puzzles) && data.puzzles.length) {
-        visionPuzzlesCache = data.puzzles;
+    const startData = await apiFetch('/api/course/ingest', {
+      method: 'POST',
+      body: JSON.stringify({
+        course_title: payload.courseTitle || '',
+        raw_notes: payload.rawNotes || '',
+        image_base64: payload.imageBase64 || null,
+        file_name: payload.fileName || null,
+        file_base64: payload.fileBase64 || null,
+        remote_vlm_url: payload.remoteVlmUrl || null,
+        profile: payload.profile || 'average',
+      }),
+    }, 30000);
+
+    let data = startData;
+    if (startData && startData.job_id && startData.job_status === 'running') {
+      if (onProgress) onProgress(startData.progress || 5, startData.step || 'Starting ingestion...');
+      const jobId = startData.job_id;
+      const maxPolls = 240; // Up to 6 minutes for huge PDFs on Kaggle GPU
+      for (let i = 0; i < maxPolls; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        const poll = await apiFetch(`/api/course/ingest/status?job_id=${encodeURIComponent(jobId)}`, {
+          method: 'GET',
+        }, 12000);
+        if (onProgress) onProgress(poll.progress || 10, poll.step || 'Processing...');
+        if (poll.job_status === 'done') {
+          data = poll;
+          break;
+        }
+        if (poll.job_status === 'error') {
+          throw new Error(poll.error || poll.step || 'Ingestion failed');
+        }
       }
-      persistToPlayer(statusCache);
-      return data;
-    } catch (e) {
-      throw e;
+      if (!data || data.job_status !== 'done') {
+        throw new Error('Ingestion timed out while waiting for VLM.');
+      }
     }
+
+    online = true;
+    statusCache = data.status;
+    if (Array.isArray(data.puzzles) && data.puzzles.length) {
+      visionPuzzlesCache = data.puzzles;
+    }
+    uploadedCourseInfo = {
+      course_id: data.course_id,
+      course_title: data.course_title || (data.status && data.status.course_title) || payload.courseTitle || 'Uploaded Course',
+      num_photos_extracted: data.num_photos_extracted || 0,
+      source_file: data.source_file || payload.fileName || '',
+    };
+    persistToPlayer(statusCache);
+    return data;
   }
 
   async function submitVisionVQA(conceptId, studentAnswer, responseSec = 10.0) {
@@ -1014,6 +1043,7 @@ const AITutor = (() => {
     stopPodcast,
     isOnline: () => online,
     getStatus: () => statusCache || buildOfflineStatus(),
+    getUploadedCourse: () => uploadedCourseInfo,
     ACTION_LABELS,
     TRAINER_CONCEPT_MAP,
   };

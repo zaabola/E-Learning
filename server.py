@@ -42,9 +42,15 @@ mimetypes.add_type('application/javascript', '.js')
 
 
 class GameServerState:
-    def __init__(self, default_course: str = 'vision_yolo_ocr', default_profile: str = 'average'):
+    def __init__(
+        self,
+        default_course: str = 'vision_yolo_ocr',
+        default_profile: str = 'average',
+        vlm_mode: str = 'hybrid',
+        vlm_model_id: str = 'Qwen/Qwen2.5-VL-7B-Instruct',
+    ):
         self.lock = threading.Lock()
-        self.engine = KnowledgeQuestAIEngine()
+        self.engine = KnowledgeQuestAIEngine(vlm_mode=vlm_mode, vlm_model_id=vlm_model_id)
         self.session = self.engine.create_session(profile=default_profile, course_id=default_course)
 
     def reset_session(self, course_id: str = 'vision_yolo_ocr', profile: str = 'average') -> dict:
@@ -236,9 +242,11 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
             return
 
         if route == '/api/course/ingest':
-            course_title = str(body.get('course_title', 'Custom AI Course')).strip()
+            course_title = str(body.get('course_title', '')).strip()
             raw_notes = str(body.get('raw_notes', '')).strip()
             image_base64 = body.get('image_base64', None)
+            file_name = body.get('file_name', None)
+            file_base64 = body.get('file_base64', None)
             remote_vlm_url = body.get('remote_vlm_url', None)
             profile = str(body.get('profile', 'average'))
             with st.lock:
@@ -246,6 +254,8 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
                     course_title=course_title,
                     raw_notes=raw_notes,
                     image_base64=image_base64,
+                    file_name=file_name,
+                    file_base64=file_base64,
                     remote_vlm_url=remote_vlm_url,
                     profile=profile,
                 )
@@ -253,28 +263,42 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
                 puzzles = st.session.get_diagram_puzzles()
             print(
                 f"  [NEW COURSE INGESTED] '{pkg['title']}' (`{pkg['course_id']}`) | "
-                f"5 Concepts + {len(puzzles)} VLM/Grounding-DINO Diagram Puzzles!"
+                f"Source='{pkg.get('source_file', 'notes')}' | "
+                f"{pkg.get('num_photos_extracted', 0)} Extracted Photos + {len(puzzles)} VLM/DINO Puzzles!"
             )
-            self._send_json({'status': snap, 'puzzles': puzzles, 'course_id': pkg['course_id']})
+            self._send_json({
+                'status': snap,
+                'puzzles': puzzles,
+                'course_id': pkg['course_id'],
+                'num_photos_extracted': pkg.get('num_photos_extracted', 0),
+                'source_file': pkg.get('source_file', ''),
+            })
             return
 
         self._send_json({'error': f'Unknown API route: {route}'}, status=404)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='KnowledgeQuest 4-Model AI + RPG Web Server')
+    parser = argparse.ArgumentParser(description='KnowledgeQuest 5-Model AI + RPG Web Server')
     parser.add_argument('--host', default='127.0.0.1', help='Bind host (default: 127.0.0.1)')
     parser.add_argument('--port', type=int, default=8000, help='Port (default: 8000)')
     parser.add_argument('--course', default='vision_yolo_ocr', help='Initial course ID')
     parser.add_argument('--profile', default='average', choices=['struggling', 'average', 'advanced'])
+    parser.add_argument('--live-vlm', action='store_true', help='Load live 7B VLM on GPU (for Kaggle 2x T4)')
+    parser.add_argument('--vlm-model', default='Qwen/Qwen2.5-VL-7B-Instruct', help='Hugging Face VLM model ID')
     parser.add_argument('--open', action='store_true', help='Open browser automatically')
     args = parser.parse_args()
 
     print("=" * 88)
-    print("  KNOWLEDGEQUEST 4-MODEL AI + BROWSER RPG SERVER")
+    print("  KNOWLEDGEQUEST 5-MODEL AI + BROWSER RPG SERVER")
     print("=" * 88)
-    print("  Loading Final-DKT-GRU + Double-DQN + DeBERTa-v3-Small + Grounding-DINO-Tiny...")
-    state = GameServerState(default_course=args.course, default_profile=args.profile)
+    print("  Loading Final-DKT-GRU + Double-DQN + DeBERTa-v3 + Grounding-DINO + Qwen-VL...")
+    state = GameServerState(
+        default_course=args.course,
+        default_profile=args.profile,
+        vlm_mode='live' if args.live_vlm else 'hybrid',
+        vlm_model_id=args.vlm_model,
+    )
     KnowledgeQuestHTTPHandler.server_state = state
 
     eng = state.engine

@@ -4,7 +4,7 @@
 // without `server.py` running (preserving AGENTS.md Rule #2).
 
 const AITutor = (() => {
-  const DEFAULT_API = (typeof location !== 'undefined' && location.protocol.startsWith('http') && location.port === '8000')
+  const DEFAULT_API = (typeof location !== 'undefined' && location.protocol.startsWith('http'))
     ? ''
     : 'http://127.0.0.1:8000';
 
@@ -460,13 +460,15 @@ const AITutor = (() => {
       const data = await apiFetch('/api/course/ingest', {
         method: 'POST',
         body: JSON.stringify({
-          course_title: payload.courseTitle || 'Custom AI Course',
+          course_title: payload.courseTitle || '',
           raw_notes: payload.rawNotes || '',
           image_base64: payload.imageBase64 || null,
+          file_name: payload.fileName || null,
+          file_base64: payload.fileBase64 || null,
           remote_vlm_url: payload.remoteVlmUrl || null,
           profile: payload.profile || 'average',
         }),
-      }, 20000);
+      }, 180000);
       online = true;
       statusCache = data.status;
       if (Array.isArray(data.puzzles) && data.puzzles.length) {

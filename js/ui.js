@@ -1231,19 +1231,22 @@ const UI = (() => {
               </div>
               <div style="background:#142236;border:1px solid #4888c8;border-radius:6px;padding:8px">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:5px">
-                  <span style="font-size:8.5px;color:#58f898">+ INGEST NEW COURSE &amp; SLIDE DIAGRAM (Qwen2.5-VL-7B + Grounding DINO)</span>
+                  <span style="font-size:8.5px;color:#58f898">+ UPLOAD PDF / PPTX / WORD (.DOCX) &mdash; VLM AUTO-EXTRACTS PHOTOS &amp; CONCEPTS</span>
                   <div style="display:flex;gap:4px">
                     <button type="button" class="ai-btn-mini" id="kq-preset-os">Preset: OS &amp; Memory</button>
                     <button type="button" class="ai-btn-mini" id="kq-preset-net">Preset: Networks &amp; TCP</button>
                   </div>
                 </div>
-                <input type="text" id="kq-new-title" placeholder="Course Title (e.g. Operating Systems: Virtual Memory & Paging)" style="width:100%;box-sizing:border-box;background:#0b1320;color:#fff;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:15px;margin-bottom:5px" />
-                <textarea id="kq-new-notes" rows="3" placeholder="Enter 5 Concept Lines (1 per line, C0..C4):&#10;1. Virtual Address Spaces & Page Tables: Translating virtual pages to physical frames&#10;2. Translation Lookaside Buffer (TLB): Hardware associative cache for fast address lookup&#10;3. Page Faults & Demand Paging: Handling missing pages from disk swap&#10;4. Page Replacement Algorithms (LRU & Clock): Evicting optimal frames under thrashing&#10;5. End-to-End MMU + TLB + OS Memory Pipeline: Complete hardware-software synthesis" style="width:100%;box-sizing:border-box;background:#0b1320;color:#dce8f6;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:14.5px;margin-bottom:5px"></textarea>
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
-                  <label style="font-family:var(--dialog-font);font-size:14.5px;color:#9cc4e8;cursor:pointer">
-                    &#128444; Optional Diagram Image (.png/.jpg): <input type="file" id="kq-new-img" accept="image/*" style="font-size:11px;color:#9cc4e8;max-width:170px" />
+                <div style="background:#0b1320;border:1px dashed #4c88c8;border-radius:5px;padding:6px 8px;margin-bottom:5px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+                  <label style="font-family:var(--dialog-font);font-size:15.5px;color:#78f0a8;cursor:pointer">
+                    &#128196; <strong>1. Select PDF, PPTX, Word (.docx), or Image:</strong>
+                    <input type="file" id="kq-new-img" accept=".pdf,.pptx,.ppt,.docx,.doc,image/*" style="font-size:11.5px;color:#dce8f6;margin-left:6px" />
                   </label>
-                  <button type="button" class="ai-btn-primary" id="kq-ingest-btn" style="width:auto;padding:6px 12px">&#9889; INGEST COURSE &amp; TEST IN LAB</button>
+                </div>
+                <input type="text" id="kq-new-title" placeholder="2. Optional Course Title (auto-filled from PDF/PPTX/DOCX filename if left empty)" style="width:100%;box-sizing:border-box;background:#0b1320;color:#fff;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:15px;margin-bottom:5px" />
+                <textarea id="kq-new-notes" rows="2" placeholder="3. Optional Notes (Leave empty when uploading PDF/PPTX/Word — Qwen2.5-VL-7B will inspect the document & extract photos/concepts automatically!)" style="width:100%;box-sizing:border-box;background:#0b1320;color:#dce8f6;border:1px solid #385880;border-radius:4px;padding:5px 8px;font-family:var(--dialog-font);font-size:14.5px;margin-bottom:5px"></textarea>
+                <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                  <button type="button" class="ai-btn-primary" id="kq-ingest-btn" style="width:100%;padding:7px 12px">&#9889; INGEST DOCUMENT WITH QWEN2.5-VL-7B + GROUNDING DINO &amp; LAUNCH LAB</button>
                 </div>
               </div>
             </div>
@@ -1318,27 +1321,41 @@ const UI = (() => {
             Sfx.cursor();
           };
         }
+        const fileInputEl = scr.querySelector('#kq-new-img');
+        if (fileInputEl) {
+          fileInputEl.onchange = () => {
+            const tEl = scr.querySelector('#kq-new-title');
+            if (fileInputEl.files && fileInputEl.files[0] && tEl && !tEl.value.trim()) {
+              const rawName = fileInputEl.files[0].name.replace(/\.[^.]+$/, '');
+              tEl.value = rawName.replace(/[_-]+/g, ' ').trim();
+            }
+          };
+        }
         const ingestBtn = scr.querySelector('#kq-ingest-btn');
         if (ingestBtn) {
           ingestBtn.onclick = async () => {
             const tEl = scr.querySelector('#kq-new-title');
             const nEl = scr.querySelector('#kq-new-notes');
             const fEl = scr.querySelector('#kq-new-img');
-            const titleVal = (tEl && tEl.value.trim()) || 'Operating Systems: Virtual Memory & Paging';
-            const notesVal = (nEl && nEl.value.trim()) || [
+            const hasFile = !!(fEl && fEl.files && fEl.files[0]);
+            const fileName = hasFile ? fEl.files[0].name : null;
+            const titleVal = (tEl && tEl.value.trim()) || (hasFile ? fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') : 'Operating Systems: Virtual Memory & Paging');
+            const notesVal = (nEl && nEl.value.trim()) || (hasFile ? '' : [
               '1. Virtual Address Spaces & Page Tables: Translating virtual page numbers to physical frames',
               '2. Translation Lookaside Buffer (TLB): Hardware cache accelerating address lookup',
               '3. Page Faults & Demand Paging: OS trap handler loading pages from disk swap',
               '4. Page Replacement (LRU & Clock): Evicting optimal frames to stop thrashing',
               '5. End-to-End MMU + TLB + OS Pipeline: Hardware-software virtual memory synthesis',
-            ].join('\n');
+            ].join('\n'));
             ingestBtn.disabled = true;
-            ingestBtn.textContent = 'INGESTING WITH VLM + GROUNDING DINO...';
+            ingestBtn.textContent = hasFile
+              ? `QWEN2.5-VL-7B INSPECTING '${fileName.slice(0, 26)}' & EXTRACTING PHOTOS...`
+              : 'INGESTING WITH QWEN2.5-VL-7B + GROUNDING DINO...';
             Sfx.select();
 
-            let imgB64 = null;
-            if (fEl && fEl.files && fEl.files[0]) {
-              imgB64 = await new Promise((resB64) => {
+            let fileB64 = null;
+            if (hasFile) {
+              fileB64 = await new Promise((resB64) => {
                 const reader = new FileReader();
                 reader.onload = () => resB64(reader.result);
                 reader.onerror = () => resB64(null);
@@ -1346,21 +1363,26 @@ const UI = (() => {
               });
             }
             try {
-              await AITutor.ingestCustomCourse({
+              const res = await AITutor.ingestCustomCourse({
                 courseTitle: titleVal,
                 rawNotes: notesVal,
-                imageBase64: imgB64,
+                fileName,
+                fileBase64: fileB64,
+                imageBase64: fileB64,
                 profile: 'average',
               });
-              toast(`Ingested "${titleVal}"! Launching Lab Monitor...`);
+              const nPhotos = (res && res.num_photos_extracted) || 0;
+              toast(nPhotos > 0
+                ? `VLM extracted ${nPhotos} photos & 5 concepts from "${fileName}"!`
+                : `Ingested "${titleVal}"! Launching Lab Monitor...`);
               if (unsub) { unsub(); unsub = null; }
               scr.remove();
               await dinoDiagramScreen(0);
               resolve();
             } catch (err) {
               ingestBtn.disabled = false;
-              ingestBtn.textContent = 'RETRY INGEST COURSE';
-              toast('Make sure server.py is running on port 8000!');
+              ingestBtn.textContent = 'RETRY INGEST DOCUMENT';
+              toast('Error: Ensure the game server is running!');
             }
           };
         }

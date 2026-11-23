@@ -72,6 +72,8 @@ class KnowledgeQuestAIEngine:
         grader_ckpt_path: str = None,
         affect_calib_path: str = None,
         grader_device: str = None,
+        vlm_mode: str = 'hybrid',
+        vlm_model_id: str = 'Qwen/Qwen2.5-VL-7B-Instruct',
     ):
         t0 = time.perf_counter()
         cpu = torch.device('cpu')
@@ -176,7 +178,11 @@ class KnowledgeQuestAIEngine:
         }
 
         # 5. Load Model #5 (Stage 1/2 Multimodal VLM): Qwen-VL-7B Diagram Comprehension Engine
-        self.vlm_engine = QwenVLDiagramEngine(mode='hybrid', device=str(self.grader_device))
+        self.vlm_engine = QwenVLDiagramEngine(
+            model_id=vlm_model_id,
+            mode=vlm_mode,
+            device=str(self.grader_device),
+        )
         self.vlm_info = {
             'name': self.vlm_engine.model_id,
             'mode': self.vlm_engine.mode,
@@ -218,6 +224,8 @@ class KnowledgeQuestAIEngine:
         course_title: str,
         raw_notes: str = '',
         image_base64: str = None,
+        file_name: str = None,
+        file_base64: str = None,
         remote_vlm_url: str = None,
         profile: str = 'average',
     ):
@@ -225,6 +233,8 @@ class KnowledgeQuestAIEngine:
             course_title=course_title,
             raw_notes=raw_notes,
             image_base64=image_base64,
+            file_name=file_name,
+            file_base64=file_base64,
             remote_vlm_url=remote_vlm_url,
             vlm_engine=self.vlm_engine,
             dino_evaluator=self.dino_evaluator,

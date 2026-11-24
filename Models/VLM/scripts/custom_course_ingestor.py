@@ -26,8 +26,10 @@ import base64
 import hashlib
 import io
 import json
+import math
 import os
 import re
+import sys
 import time
 import xml.etree.ElementTree as ET
 import zipfile
@@ -39,6 +41,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 VLM_ROOT = os.path.dirname(SCRIPT_DIR)
 MODELS_ROOT = os.path.dirname(VLM_ROOT)
 REPO_ROOT = os.path.dirname(MODELS_ROOT)
+
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+from vlm_diagram_engine import box_content_stats, trim_blank_margins
 
 
 def _slugify(text: str) -> str:
@@ -782,20 +788,33 @@ def ingest_custom_course_package(
                 d_prompt = d_prompt.strip() + "."
 
             vlm_box_px = [float(v) for v in comp.get("vlm_box_px", [60.0, 80.0, 340.0, 340.0])]
+            raw_valid_boxes = comp.get("valid_boxes") or [vlm_box_px]
             grounding_tier = comp.get("grounding_tier", f"{vlm_name}-FP16")
             refined_box = vlm_box_px
 
-            # Refine with LLMDet-Large / Grounding-DINO only when high-IoU consensus confirms the VLM box
+            # Refine with LLMDet-Large / Grounding-DINO via:
+            #   1) High-IoU consensus sharpening (`IoU >= 0.40`), OR
+            #   2) Blank-margin rescue when VLM drifted onto empty white space beside a real component!
             if dino_evaluator is not None and os.path.exists(abs_diag):
                 try:
                     pil_im = Image.open(abs_diag).convert("RGB")
+                    refined_box = trim_blank_margins(pil_im, refined_box)
+                    vlm_is_blank = box_content_stats(pil_im, refined_box)["is_blank"]
+
                     if hasattr(dino_evaluator, "detect_boxes"):
                         d_boxes, d_scores, _ = dino_evaluator.detect_boxes(
                             img=pil_im,
                             prompt=d_prompt,
-                            threshold=0.20,
+                            threshold=0.18,
                             target_sizes=[(420, 720)],
                         )
+                        if vlm_is_blank and not d_boxes:
+                            d_boxes, d_scores, _ = dino_evaluator.detect_boxes(
+                                img=pil_im,
+                                prompt="diagram cylinder. diagram box. oval. table.",
+                                threshold=0.18,
+                                target_sizes=[(420, 720)],
+                            )
                     else:
                         inputs = dino_evaluator.processor(
                             images=pil_im, text=d_prompt, return_tensors="pt"
@@ -815,26 +834,59 @@ def ingest_custom_course_package(
                     best_match_box = None
                     best_match_iou = 0.0
                     best_match_comb = -1.0
-                    area_v = max(1.0, (vlm_box_px[2] - vlm_box_px[0]) * (vlm_box_px[3] - vlm_box_px[1]))
+                    area_v = max(1.0, (refined_box[2] - refined_box[0]) * (refined_box[3] - refined_box[1]))
+                    v_cx = 0.5 * (refined_box[0] + refined_box[2])
+                    v_cy = 0.5 * (refined_box[1] + refined_box[3])
+
+                    best_rescue_box = None
+                    best_rescue_dist = 1e9
+
                     for cand_box, cand_score in zip(d_boxes, d_scores):
                         cb = [round(float(v), 1) for v in cand_box]
-                        ix1 = max(vlm_box_px[0], cb[0])
-                        iy1 = max(vlm_box_px[1], cb[1])
-                        ix2 = min(vlm_box_px[2], cb[2])
-                        iy2 = min(vlm_box_px[3], cb[3])
-                        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
                         area_d = max(1.0, (cb[2] - cb[0]) * (cb[3] - cb[1]))
+                        if area_d < 500.0 or area_d > 0.55 * 720.0 * 420.0:
+                            continue
+                        if box_content_stats(pil_im, cb)["is_blank"]:
+                            continue
+
+                        ix1 = max(refined_box[0], cb[0])
+                        iy1 = max(refined_box[1], cb[1])
+                        ix2 = min(refined_box[2], cb[2])
+                        iy2 = min(refined_box[3], cb[3])
+                        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
                         iou = inter / (area_v + area_d - inter)
                         comb = 0.65 * iou + 0.35 * float(cand_score)
                         if comb > best_match_comb:
                             best_match_comb = comb
                             best_match_iou = iou
                             best_match_box = cb
+
+                        if vlm_is_blank:
+                            d_cx = 0.5 * (cb[0] + cb[2])
+                            d_cy = 0.5 * (cb[1] + cb[3])
+                            dist = math.hypot(d_cx - v_cx, d_cy - v_cy)
+                            if dist <= 165.0 and dist < best_rescue_dist:
+                                best_rescue_dist = dist
+                                best_rescue_box = cb
+
                     if best_match_box is not None and best_match_iou >= 0.40:
-                        refined_box = [round(0.70 * vlm_box_px[i] + 0.30 * best_match_box[i], 1) for i in range(4)]
+                        refined_box = [round(0.65 * refined_box[i] + 0.35 * best_match_box[i], 1) for i in range(4)]
+                        refined_box = trim_blank_margins(pil_im, refined_box)
                         grounding_tier = f"{vlm_name} + {dino_name}"
+                    elif vlm_is_blank and best_rescue_box is not None:
+                        refined_box = trim_blank_margins(pil_im, best_rescue_box)
+                        grounding_tier = f"{dino_name}-Rescue"
+                        print(
+                            f"  [{dino_name} RESCUE] Snapped blank-margin VLM box for '{t_label}' -> {refined_box}",
+                            flush=True,
+                        )
                 except Exception:
                     pass
+
+            final_valid_boxes = [refined_box]
+            for extra_vb in raw_valid_boxes[1:]:
+                ev = [round(float(v), 1) for v in extra_vb]
+                final_valid_boxes.append(ev)
 
             b1000 = [
                 round(refined_box[0] * 1000.0 / 720.0),
@@ -842,11 +894,12 @@ def ingest_custom_course_package(
                 round(refined_box[2] * 1000.0 / 720.0),
                 round(refined_box[3] * 1000.0 / 420.0),
             ]
-            lab_q = comp.get("lab_question") or f"Click or drag a box around [{t_label}] in this diagram (Page {page_num})."
+            lab_q = comp.get("lab_question") or f"Click or drag a box around '{t_label}' in this diagram (Page {page_num})."
             expl = comp.get("explanation") or visual_summary
-            hint = comp.get("socratic_hint") or f"Locate [{t_label}] inside the extracted figure from Page {page_num}."
+            hint = comp.get("socratic_hint") or f"Locate '{t_label}' inside the extracted figure from Page {page_num}."
 
-            all_regions_for_puzzle.append({"label": t_label, "box": refined_box})
+            for vb in final_valid_boxes:
+                all_regions_for_puzzle.append({"label": t_label, "box": vb})
             final_comps.append(
                 {
                     "component_id": pid,
@@ -855,6 +908,7 @@ def ingest_custom_course_package(
                     "grounding_tier": grounding_tier,
                     "vlm_box_1000": b1000,
                     "vlm_box_px": refined_box,
+                    "valid_boxes": final_valid_boxes,
                     "ground_truth_box_px": refined_box,
                     "lab_question": f"LAB C{cid}-{'A' if p_idx == 0 else 'B'} (Page {page_num}): {lab_q}",
                     "socratic_hint": hint,
@@ -876,6 +930,7 @@ def ingest_custom_course_package(
                     "grounding_tier": fc.get("grounding_tier", "fallback"),
                     "prompt": fc["lab_question"],
                     "target_box": fc["ground_truth_box_px"],
+                    "valid_boxes": fc.get("valid_boxes", [fc["ground_truth_box_px"]]),
                     "all_regions": list(all_regions_for_puzzle),
                     "explanation": fc["explanation"],
                 }

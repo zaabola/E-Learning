@@ -56,8 +56,8 @@ VLM_SYSTEM_PROMPT = (
     "You are an expert University Professor and Multimodal Curriculum Architect. "
     "Inspect ONLY the provided technical slide/diagram image and its slide text context. "
     "Write questions and summaries in the SAME language as the slide (French if the slide is in French, English if in English). "
-    "CRITICAL: For each component's `target_label`, copy the EXACT verbatim text printed inside a visible box, cloud, oval, or table row in THIS image (e.g. 'DBWn', 'Cache de tampons de la base de données', 'DBA') — NEVER translate printed labels and NEVER use placeholder words! "
-    "Pick 2 visually DISTINCT, well-separated components in the figure (prefer separate boxes/blocks/sections over two tiny adjacent lines right next to each other when larger blocks exist). "
+    "CRITICAL: For each component's `target_label`, copy the EXACT verbatim text printed inside a visible box, cylinder, cloud, oval, or table row in THIS image (e.g. 'DBWn', 'Cache de tampons de la base de données', 'DBA') — NEVER translate printed labels and NEVER use placeholder words! "
+    "Pick 2 visually DISTINCT, NON-REPEATED components in the figure: prefer whole boxes, cylinders, clouds, or unique section headers (e.g. 'DESCRIBE DICTIONARY', 'Base de données', 'Mémoire SGA') rather than generic column names like 'TABLE_NAME' or 'COMMENTS' that appear multiple times in the same image! "
     "Keep every string concise (1 short sentence). Return ONLY a valid JSON object matching this schema:\n"
     "{\n"
     '  "is_educational_diagram": true,\n'
@@ -112,6 +112,82 @@ def compute_iou(box_a, box_b) -> float:
     area_b = abs(bx2 - bx1) * abs(by2 - by1)
     union = area_a + area_b - inter
     return float(inter / union) if union > 1e-6 else 0.0
+
+
+def box_content_stats(pil_img: Image.Image, box: list) -> dict:
+    """
+    Measures foreground ink/shape density inside `box` on a 720x420 diagram so empty
+    white margins (or 90% blank boxes barely clipping a border) are reliably detected,
+    while preserving genuine white table cells containing short words like 'DBA'.
+    """
+    import numpy as np
+
+    W, H = pil_img.size
+    x1 = max(0, min(W - 2, int(round(float(box[0])))))
+    y1 = max(0, min(H - 2, int(round(float(box[1])))))
+    x2 = max(x1 + 2, min(W, int(round(float(box[2])))))
+    y2 = max(y1 + 2, min(H, int(round(float(box[3])))))
+    sub = pil_img.convert("RGB").crop((x1, y1, x2, y2))
+    arr = np.asarray(sub, dtype=np.float32)
+    gray = arr.mean(axis=2)
+    bg_dark = (
+        np.abs(arr[:, :, 0] - 14.0)
+        + np.abs(arr[:, :, 1] - 22.0)
+        + np.abs(arr[:, :, 2] - 36.0)
+    ) <= 24.0
+    bg_white = (arr[:, :, 0] >= 244.0) & (arr[:, :, 1] >= 244.0) & (arr[:, :, 2] >= 240.0)
+    fg = (~bg_dark) & (~bg_white)
+
+    in_fg = fg[2:-2, 2:-2] if (fg.shape[0] > 6 and fg.shape[1] > 6) else fg
+    col_has_fg = in_fg.mean(axis=0) > 0.03
+    row_has_fg = in_fg.mean(axis=1) > 0.03
+    active_w = int(col_has_fg.sum())
+    active_h = int(row_has_fg.sum())
+    gx = float(np.abs(np.diff(gray, axis=1)).mean()) if gray.shape[1] > 1 else 0.0
+    gy = float(np.abs(np.diff(gray, axis=0)).mean()) if gray.shape[0] > 1 else 0.0
+    edge = gx + gy
+    fg_ratio = float(in_fg.mean()) if in_fg.size > 0 else 0.0
+    is_blank = (fg_ratio < 0.025 and edge < 4.0) or (active_w < 12) or (active_h < 6)
+    return {
+        "is_blank": bool(is_blank),
+        "fg_ratio": round(fg_ratio, 4),
+        "edge": round(edge, 2),
+        "active_w": active_w,
+        "active_h": active_h,
+    }
+
+
+def trim_blank_margins(pil_img: Image.Image, box: list) -> list:
+    """
+    Trims pure empty white/letterbox margin strips off the outer edges of `box` while
+    preserving bordered table cells and leaving a clean 4px visual margin.
+    """
+    import numpy as np
+
+    W, H = pil_img.size
+    x1 = max(0, min(W - 4, int(round(float(box[0])))))
+    y1 = max(0, min(H - 4, int(round(float(box[1])))))
+    x2 = max(x1 + 4, min(W, int(round(float(box[2])))))
+    y2 = max(y1 + 4, min(H, int(round(float(box[3])))))
+    sub = pil_img.convert("RGB").crop((x1, y1, x2, y2))
+    arr = np.asarray(sub, dtype=np.float32)
+    bg_dark = (
+        np.abs(arr[:, :, 0] - 14.0)
+        + np.abs(arr[:, :, 1] - 22.0)
+        + np.abs(arr[:, :, 2] - 36.0)
+    ) <= 24.0
+    bg_white = (arr[:, :, 0] >= 244.0) & (arr[:, :, 1] >= 244.0) & (arr[:, :, 2] >= 240.0)
+    fg = (~bg_dark) & (~bg_white)
+    ys, xs = np.where(fg)
+    if len(xs) < 25 or len(ys) < 25:
+        return [round(float(x1), 1), round(float(y1), 1), round(float(x2), 1), round(float(y2), 1)]
+    nx1 = max(x1, x1 + int(xs.min()) - 4)
+    ny1 = max(y1, y1 + int(ys.min()) - 4)
+    nx2 = min(x2, x1 + int(xs.max()) + 5)
+    ny2 = min(y2, y1 + int(ys.max()) + 5)
+    if (nx2 - nx1) >= 24 and (ny2 - ny1) >= 16:
+        return [round(float(nx1), 1), round(float(ny1), 1), round(float(nx2), 1), round(float(ny2), 1)]
+    return [round(float(x1), 1), round(float(y1), 1), round(float(x2), 1), round(float(y2), 1)]
 
 
 def _repair_truncated_json(text: str) -> str:
@@ -327,16 +403,19 @@ class QwenVLDiagramEngine:
 
         last_err = None
         for source in candidates:
-            # On 2x T4 (15 GB/GPU), 4-bit NF4 pinned to dedicated cuda:1 is 2.5x faster
-            # than pipeline-splitting 17.6 GB FP16 across two T4s and prevents CPU offload!
+            # On 2x T4 (15 GB/GPU), keep the Vision Tower (`visual` + `merger`) in FULL FP16
+            # while quantizing ONLY the LLM backbone to 4-bit NF4 on dedicated cuda:1 (~6.8 GB)!
+            # Includes an automatic boot smoke-test fallback to standard 4-bit -> balanced FP16.
             if single_gpu_vram_gb >= 22.0:
-                precision_plans = [False, True]
+                precision_plans = ["fp16", "4bit_fp16_vision", "4bit_standard"]
             elif num_gpus >= 2:
-                precision_plans = [True, False]
+                precision_plans = ["4bit_fp16_vision", "4bit_standard", "fp16"]
             else:
-                precision_plans = [bool(self.load_in_4bit)]
+                precision_plans = ["4bit_fp16_vision", "4bit_standard"] if self.load_in_4bit else ["fp16"]
 
-            for try_4bit in precision_plans:
+            for plan in precision_plans:
+                try_4bit = plan.startswith("4bit")
+                skip_vision_quant = plan == "4bit_fp16_vision"
                 if not torch.cuda.is_available():
                     dev_map = None
                     dev_tag = "cpu"
@@ -353,7 +432,11 @@ class QwenVLDiagramEngine:
                     dev_map = "auto"
                     dev_tag = "auto"
 
-                precision_tag = "4-bit NF4" if try_4bit else "FULL FP16"
+                precision_tag = (
+                    "4-bit NF4 + FP16 Vision"
+                    if skip_vision_quant
+                    else ("4-bit NF4" if try_4bit else "FULL FP16")
+                )
                 print(
                     f"[VLM] Loading {source} ({precision_tag}, device={dev_tag}, total_vram={total_vram_gb:.1f}GB)...",
                     flush=True,
@@ -361,12 +444,22 @@ class QwenVLDiagramEngine:
                 try:
                     quant_config = None
                     if try_4bit and torch.cuda.is_available():
-                        quant_config = BitsAndBytesConfig(
-                            load_in_4bit=True,
-                            bnb_4bit_compute_dtype=torch.float16,
-                            bnb_4bit_use_double_quant=True,
-                            bnb_4bit_quant_type="nf4",
-                        )
+                        bnb_kwargs = {
+                            "load_in_4bit": True,
+                            "bnb_4bit_compute_dtype": torch.float16,
+                            "bnb_4bit_use_double_quant": True,
+                            "bnb_4bit_quant_type": "nf4",
+                        }
+                        if skip_vision_quant:
+                            bnb_kwargs["llm_int8_skip_modules"] = [
+                                "visual",
+                                "model.visual",
+                                "merger",
+                                "deepstack_merger_list",
+                                "multi_modal_projector",
+                                "lm_head",
+                            ]
+                        quant_config = BitsAndBytesConfig(**bnb_kwargs)
 
                     processor = AutoProcessor.from_pretrained(source)
                     model_cls = self._resolve_model_class(source)
@@ -381,6 +474,30 @@ class QwenVLDiagramEngine:
                         load_kwargs["max_memory"] = {0: "11GiB", 1: "13GiB"}
 
                     model = model_cls.from_pretrained(source, **load_kwargs).eval()
+
+                    # Verify dtype compatibility with a fast 64x64 vision+text forward smoke test
+                    if torch.cuda.is_available():
+                        smoke_im = Image.new("RGB", (64, 64), (220, 220, 220))
+                        smoke_msg = [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "image", "image": smoke_im},
+                                    {"type": "text", "text": "OK"},
+                                ],
+                            }
+                        ]
+                        smoke_txt = processor.apply_chat_template(
+                            smoke_msg, tokenize=False, add_generation_prompt=True
+                        )
+                        smoke_in = processor(
+                            text=[smoke_txt], images=[smoke_im], return_tensors="pt"
+                        )
+                        smoke_in.pop("token_type_ids", None)
+                        smoke_in = smoke_in.to(model.device)
+                        with torch.no_grad():
+                            _ = model.generate(**smoke_in, max_new_tokens=2, do_sample=False)
+
                     self.vlm_processor = processor
                     self.vlm_model = model
                     self.model_id = source
@@ -518,20 +635,28 @@ class QwenVLDiagramEngine:
         diagram_rect: tuple,
     ) -> list:
         """
-        Stage-2 Pure-VLM Zoom-In Grounding Pass (3x effective visual patch resolution!):
-        Crops a generous neighborhood around the coarse Qwen-VL box so tight table rows
-        (e.g. `TABLE_NAME` vs `COMMENTS`) or small ovals (`DBWn` vs `SMON`) span multiple
-        32px vision patches, then asks Qwen-VL to pinpoint ONLY `target_label`.
+        Stage-2 Pure-VLM Zoom-In Grounding Pass with strict safety guards:
+          - Uses a wide context crop (>=60% of diagram around `coarse_box`) so neighboring
+            cylinders/rows are never cut off if the coarse box drifted slightly.
+          - Rejects any zoomed box that lands on blank white margin (`box_content_stats`).
+          - Prevents wild cross-diagram jumps (>115px) when `coarse_box` already sits on
+            real foreground ink, while allowing up to 220px rescue jumps when `coarse_box`
+            landed on empty white margin!
         """
+        import math
+
         width, height = img.size
         cx1, cy1, cw, ch = diagram_rect
         bx1, by1, bx2, by2 = [float(v) for v in coarse_box]
         bw = max(20.0, bx2 - bx1)
         bh = max(16.0, by2 - by1)
 
-        # Only zoom-refine small/medium boxes (<45% of diagram area) where 1-patch drift hurts
+        coarse_stats = box_content_stats(img, coarse_box)
+        coarse_is_blank = coarse_stats["is_blank"]
+
+        # Zoom-refine small/medium boxes (<38% of diagram area) OR any blank-margin box
         diag_area = max(1.0, float(cw * ch))
-        if (bw * bh) / diag_area >= 0.45:
+        if (not coarse_is_blank) and ((bw * bh) / diag_area >= 0.38):
             return coarse_box
 
         low_id = (self.model_id or "").lower()
@@ -539,8 +664,9 @@ class QwenVLDiagramEngine:
         is_qwen25 = ("2.5" in low_id or "2_5" in low_id) and not is_qwen3
         stride = 32 if is_qwen3 else 28
 
-        pad_x = max(120.0, bw * 1.15)
-        pad_y = max(90.0, bh * 1.75)
+        # Wide neighborhood window so the true target is never cropped out
+        pad_x = max(180.0, bw * 1.80, cw * 0.30)
+        pad_y = max(125.0, bh * 2.10, ch * 0.28)
         zx1 = max(int(cx1), int(round(bx1 - pad_x)))
         zy1 = max(int(cy1), int(round(by1 - pad_y)))
         zx2 = min(int(cx1 + cw), int(round(bx2 + pad_x)))
@@ -550,7 +676,7 @@ class QwenVLDiagramEngine:
             return coarse_box
 
         zoom_crop = img.convert("RGB").crop((zx1, zy1, zx2, zy2))
-        scale = min(544.0 / float(zw), 416.0 / float(zh))
+        scale = min(640.0 / float(zw), 480.0 / float(zh))
         scale = max(1.0, scale)
         aw = max(stride * 8, int(round((zw * scale) / float(stride))) * stride)
         ah = max(stride * 6, int(round((zh * scale) / float(stride))) * stride)
@@ -566,15 +692,15 @@ class QwenVLDiagramEngine:
             if hasattr(ip, "min_pixels"):
                 ip.min_pixels = min(px_area, 128 * unit)
             if hasattr(ip, "max_pixels"):
-                ip.max_pixels = max(px_area, 1024 * unit)
+                ip.max_pixels = max(px_area, 1200 * unit)
             if hasattr(ip, "size") and isinstance(ip.size, dict):
                 ip.size["shortest_edge"] = min(px_area, 128 * unit)
-                ip.size["longest_edge"] = max(px_area, 1024 * unit)
+                ip.size["longest_edge"] = max(px_area, 1200 * unit)
 
         zoom_prompt = (
             f'This is a zoomed-in crop of a technical diagram. Locate ONLY the exact box, '
-            f'table cell, oval, cloud, or container that holds "{target_label}" '
-            f'(be careful NOT to box an adjacent row or neighboring label above or below it!). '
+            f'cylinder, table cell, oval, cloud, or container that holds the verbatim text "{target_label}" '
+            f'(NEVER box empty white background margin, and do NOT box an adjacent row or label!). '
             f'Output ONLY JSON: [{{"bbox_2d": [x1, y1, x2, y2], "label": "{target_label}"}}]'
         )
         messages = [
@@ -626,12 +752,35 @@ class QwenVLDiagramEngine:
         if not m_arr:
             return coarse_box
         raw_b = [float(m_arr.group(i)) for i in range(1, 5)]
-        zbox, cmode = self._decode_raw_box_to_canvas(
+        zbox, _ = self._decode_raw_box_to_canvas(
             raw_b, is_qwen3, is_qwen25, model_w, model_h, (zx1, zy1, zw, zh), width, height
         )
-        # Reject degenerate full-crop boxes (>92% of zoom window area)
+        zbox = trim_blank_margins(img, zbox)
+
+        # Safety Guard 1: Reject degenerate full-crop boxes (>90% of zoom window area)
         z_area = max(1.0, (zbox[2] - zbox[0]) * (zbox[3] - zbox[1]))
-        if z_area > 0.92 * float(zw * zh):
+        if z_area > 0.90 * float(zw * zh):
+            return coarse_box
+
+        # Safety Guard 2: Never accept a zoom box that lands on empty white margin!
+        z_stats = box_content_stats(img, zbox)
+        if z_stats["is_blank"]:
+            print(
+                f"  [{self.short_model_name} ZOOM-GUARD] Rejected blank zoom box {zbox} for '{target_label}'",
+                flush=True,
+            )
+            return coarse_box
+
+        # Safety Guard 3: Prevent wild cross-diagram jumps unless rescuing a blank coarse box
+        c_cx, c_cy = 0.5 * (bx1 + bx2), 0.5 * (by1 + by2)
+        z_cx, z_cy = 0.5 * (zbox[0] + zbox[2]), 0.5 * (zbox[1] + zbox[3])
+        jump_px = math.hypot(z_cx - c_cx, z_cy - c_cy)
+        max_jump = 230.0 if coarse_is_blank else 115.0
+        if jump_px > max_jump:
+            print(
+                f"  [{self.short_model_name} ZOOM-GUARD] Rejected large jump ({jump_px:.1f}px > {max_jump:.0f}px) on '{target_label}'",
+                flush=True,
+            )
             return coarse_box
 
         print(
@@ -640,17 +789,19 @@ class QwenVLDiagramEngine:
         )
         return zbox
 
-    def ground_components_batch_live(
+    def ground_target_occurrences_live(
         self,
         img: Image.Image,
-        target_labels: list,
+        target_label: str,
     ) -> list:
         """
-        2-Stage Pure-VLM Visual Grounding:
-          Stage 1: High-res full-diagram batched grounding (`~1088x768`, 14-22 vertical patches)
-                   for BOTH targets at once.
-          Stage 2: Automatic 3x Zoom-In refinement (`refine_box_zoom_live`) for small/medium
-                   targets so stacked table rows and tiny ovals align to the exact pixel!
+        Dedicated high-resolution single-target grounding pass that finds EVERY visible
+        occurrence of `target_label` on the diagram:
+          - Eliminates cross-label interference between Component A and Component B.
+          - Prevents averaging top & bottom occurrences into the middle when a label
+            (e.g. 'TABLE_NAME' or 'COMMENTS') appears more than once on the same slide.
+          - Trims blank outer margins and filters empty white-background boxes.
+        Returns a list of valid `[x1, y1, x2, y2]` canvas boxes (at least 1 if found).
         """
         self.load_live_vlm()
         width, height = img.size
@@ -674,15 +825,12 @@ class QwenVLDiagramEngine:
                 ip.size["shortest_edge"] = min(px_area, 256 * unit)
                 ip.size["longest_edge"] = max(px_area, 1600 * unit)
 
-        lbl_lines = "\n".join([f'{i + 1}. "{lbl}"' for i, lbl in enumerate(target_labels)])
-        schema_example = ", ".join(
-            [f'{{"bbox_2d": [x1, y1, x2, y2], "label": "{lbl}"}}' for lbl in target_labels]
-        )
         ground_prompt = (
-            f"Locate the ENTIRE enclosing box, rectangle, oval, cloud, or container shape "
-            f"for EACH of these labels (include all wrapped lines of text inside each shape and "
-            f"its full outer border, NOT just a single word):\n{lbl_lines}\n"
-            f"Output ONLY JSON: [{schema_example}]"
+            f'Locate EVERY visible occurrence of "{target_label}" inside this diagram. '
+            f'For each occurrence, output the bounding box of its ENTIRE enclosing component shape '
+            f'(cylinder, rectangle, oval, cloud, or table cell holding "{target_label}" — '
+            f'include all wrapped text lines and outer border, NEVER empty white background margin!). '
+            f'Output ONLY a JSON list: [{{"bbox_2d": [x1, y1, x2, y2], "label": "{target_label}"}}]'
         )
         messages = [
             {
@@ -726,61 +874,67 @@ class QwenVLDiagramEngine:
         )[0]
         dt = time.perf_counter() - t0
 
-        # Parse JSON array of {"bbox_2d": [...], "label": "..."} objects
-        parsed_entries = []
-        try:
-            s = raw.find("[")
-            e = raw.rfind("]")
-            if s != -1 and e > s:
-                arr = json.loads(raw[s : e + 1])
-                if isinstance(arr, list):
-                    for item in arr:
-                        if isinstance(item, dict) and isinstance(item.get("bbox_2d"), list) and len(item["bbox_2d"]) == 4:
-                            parsed_entries.append((str(item.get("label", "")), [float(v) for v in item["bbox_2d"]]))
-        except Exception:
-            pass
+        raw_boxes = []
+        matches = re.findall(
+            r'"bbox_2d"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]',
+            raw,
+        )
+        for m in matches:
+            raw_boxes.append([float(v) for v in m])
+        if not raw_boxes:
+            nums = re.findall(r"-?\d+(?:\.\d+)?", raw)
+            if len(nums) >= 4:
+                raw_boxes.append([float(v) for v in nums[:4]])
 
-        if len(parsed_entries) < len(target_labels):
-            matches = re.findall(
-                r'"bbox_2d"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]',
-                raw,
+        if not raw_boxes:
+            return []
+
+        decoded_all = []
+        cmode = "0..1000"
+        for rb in raw_boxes[:4]:
+            cbox, cmode = self._decode_raw_box_to_canvas(
+                rb, is_qwen3, is_qwen25, model_w, model_h, crop_rect, width, height
             )
-            if len(matches) >= len(parsed_entries):
-                parsed_entries = [("", [float(v) for v in m]) for m in matches]
+            cbox = trim_blank_margins(img, cbox)
+            # Deduplicate near-identical overlapping boxes
+            if all(compute_iou(cbox, prev) < 0.55 for prev in decoded_all):
+                decoded_all.append(cbox)
 
-        out_boxes = [None] * len(target_labels)
-        used = set()
-        for idx, lbl in enumerate(target_labels):
-            lbl_low = lbl.strip().lower()
-            chosen_j = None
-            for j, (plbl, _) in enumerate(parsed_entries):
-                if j in used:
-                    continue
-                pl_low = plbl.strip().lower()
-                if pl_low and (pl_low == lbl_low or lbl_low in pl_low or pl_low in lbl_low):
-                    chosen_j = j
-                    break
-            if chosen_j is None:
-                for j in range(len(parsed_entries)):
-                    if j not in used:
-                        chosen_j = j
-                        break
-            if chosen_j is not None:
-                used.add(chosen_j)
-                raw_b = parsed_entries[chosen_j][1]
-                cbox, cmode = self._decode_raw_box_to_canvas(
-                    raw_b, is_qwen3, is_qwen25, model_w, model_h, crop_rect, width, height
-                )
-                print(
-                    f"  [{self.short_model_name} GROUND-BATCH {dt:.1f}s] '{lbl}' | mode={cmode} | aligned={aw}x{ah} | raw={raw_b} -> canvas={cbox}",
-                    flush=True,
-                )
-                try:
-                    cbox = self.refine_box_zoom_live(img, lbl, cbox, crop_rect)
-                except Exception as z_exc:
-                    print(f"  [{self.short_model_name} ZOOM-REFINE] Skipped on '{lbl}': {z_exc}", flush=True)
-                out_boxes[idx] = cbox
-        return out_boxes
+        non_blank = [b for b in decoded_all if not box_content_stats(img, b)["is_blank"]]
+        candidates = non_blank if non_blank else decoded_all
+
+        # Only run Zoom-Refine when there is a single target occurrence (avoids collapsing multi-occurrences!)
+        if len(candidates) == 1:
+            primary = candidates[0]
+            print(
+                f"  [{self.short_model_name} GROUND {dt:.1f}s] '{target_label}' (1 occ) | mode={cmode} | aligned={aw}x{ah} -> canvas={primary}",
+                flush=True,
+            )
+            try:
+                refined = self.refine_box_zoom_live(img, target_label, primary, crop_rect)
+                candidates = [refined]
+            except Exception as z_exc:
+                print(f"  [{self.short_model_name} ZOOM-REFINE] Skipped on '{target_label}': {z_exc}", flush=True)
+        else:
+            print(
+                f"  [{self.short_model_name} GROUND {dt:.1f}s] '{target_label}' ({len(candidates)} occs) | mode={cmode} | aligned={aw}x{ah} -> canvas={candidates}",
+                flush=True,
+            )
+        return candidates
+
+    def ground_components_batch_live(
+        self,
+        img: Image.Image,
+        target_labels: list,
+    ) -> list:
+        """
+        Backward-compatible wrapper returning `[primary_box_0, primary_box_1, ...]`.
+        """
+        out = []
+        for lbl in target_labels:
+            occs = self.ground_target_occurrences_live(img, lbl)
+            out.append(occs[0] if occs else None)
+        return out
 
     def ground_component_bbox_live(
         self,
@@ -789,11 +943,10 @@ class QwenVLDiagramEngine:
         dino_prompt: str = "",
     ) -> list:
         """
-        Single-target native Qwen-VL visual grounding pass (fallback if batch grounding
-        misses one label).
+        Single-target native Qwen-VL visual grounding pass returning primary box.
         """
-        res = self.ground_components_batch_live(img, [target_label])
-        return res[0] if res else None
+        occs = self.ground_target_occurrences_live(img, target_label)
+        return occs[0] if occs else None
 
     def comprehend_diagram_live(
         self,
@@ -946,27 +1099,21 @@ class QwenVLDiagramEngine:
             )
             comp_meta.append((rc, lc, str(t_label), str(d_prompt)))
 
-        # Batched 1-pass grounding for BOTH targets at once (2x faster!)
-        batched_boxes = [None, None]
+        # Dedicated high-res all-occurrences grounding per target (eliminates cross-label interference!)
+        all_occ_lists = [[], []]
         if not use_reference_cache and parsed.get("is_educational_diagram", True) is not False:
-            try:
-                batched_boxes = self.ground_components_batch_live(
-                    img, [comp_meta[0][2], comp_meta[1][2]]
-                )
-            except Exception as g_exc:
-                print(f"  [{self.short_model_name} GROUND-BATCH] Warning: {g_exc}", flush=True)
+            for idx in range(2):
+                try:
+                    all_occ_lists[idx] = self.ground_target_occurrences_live(img, comp_meta[idx][2])
+                except Exception as g_exc:
+                    print(f"  [{self.short_model_name} GROUND] Warning on '{comp_meta[idx][2]}': {g_exc}", flush=True)
 
         normalized_comps = []
         for idx in range(2):
             rc, lc, t_label, d_prompt = comp_meta[idx]
-            px_box = batched_boxes[idx] if idx < len(batched_boxes) else None
+            occs = all_occ_lists[idx] if idx < len(all_occ_lists) else []
+            px_box = occs[0] if occs else None
             grounding_tier = f"{self.short_model_name}-{getattr(self, 'precision_tag', '4bit')}"
-
-            if px_box is None and not use_reference_cache and parsed.get("is_educational_diagram", True) is not False:
-                try:
-                    px_box = self.ground_component_bbox_live(img, target_label=t_label, dino_prompt=d_prompt)
-                except Exception as g_exc:
-                    print(f"  [{self.short_model_name} GROUND] Fallback on '{t_label}': {g_exc}", flush=True)
 
             if px_box is None:
                 raw_b = lc.get("bbox_2d") or lc.get("vlm_box_1000")
@@ -976,6 +1123,7 @@ class QwenVLDiagramEngine:
                             px_box, _ = self._decode_raw_box_to_canvas(
                                 raw_b, is_qwen3, is_qwen25, pass1_model_w, pass1_model_h, (cx1, cy1, cw, ch), width, height
                             )
+                            px_box = trim_blank_margins(img, px_box)
                         else:
                             px_box = box_1000_to_pixel(raw_b, width, height)
                     except Exception:
@@ -1001,6 +1149,11 @@ class QwenVLDiagramEngine:
                 if compute_iou(px_box, gt_px) < 0.50:
                     px_box = box_1000_to_pixel(rc["vlm_box_1000"], width, height)
 
+            valid_boxes = [px_box]
+            for extra_b in occs[1:]:
+                if all(compute_iou(extra_b, vb) < 0.55 for vb in valid_boxes):
+                    valid_boxes.append(extra_b)
+
             box_1000 = [
                 round(px_box[0] * 1000.0 / max(1.0, float(width))),
                 round(px_box[1] * 1000.0 / max(1.0, float(height))),
@@ -1019,6 +1172,7 @@ class QwenVLDiagramEngine:
                 "grounding_tier": grounding_tier,
                 "vlm_box_1000": box_1000,
                 "vlm_box_px": px_box,
+                "valid_boxes": valid_boxes,
                 "ground_truth_box_px": rc.get("ground_truth_box_px", px_box) if use_reference_cache else px_box,
                 "lab_question": lab_q_final,
                 "socratic_hint": lc.get("socratic_hint") or rc.get("socratic_hint") or f"Look closely for '{t_label}' in this figure.",

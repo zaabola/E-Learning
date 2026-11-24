@@ -949,7 +949,11 @@ const AITutor = (() => {
     const hasUploadedCache = Array.isArray(visionPuzzlesCache) && visionPuzzlesCache.length > 0;
     const pool = hasUploadedCache ? visionPuzzlesCache : FALLBACK_VISION_PUZZLES;
     const p = pool.find(x => x.puzzle_id === puzzleId) || pool[0];
-    const tb = p.target_box || [100, 100, 300, 300];
+    const baseTb = p.target_box || [100, 100, 300, 300];
+    const candBoxes = Array.isArray(p.valid_boxes) && p.valid_boxes.length > 0
+      ? p.valid_boxes
+      : [baseTb];
+    let tb = baseTb;
     const cid = Number(p.concept_id || 0);
     const before = (statusCache && Array.isArray(statusCache.mastery))
       ? statusCache.mastery.slice()
@@ -960,18 +964,27 @@ const AITutor = (() => {
     let hasBox = userBox && userBox.length === 4 && Math.abs(userBox[2] - userBox[0]) >= 12 && Math.abs(userBox[3] - userBox[1]) >= 12;
     let cx = hasBox ? 0.5 * (userBox[0] + userBox[2]) : Number(clickX || 0);
     let cy = hasBox ? 0.5 * (userBox[1] + userBox[3]) : Number(clickY || 0);
-    const inside = cx >= tb[0] && cx <= tb[2] && cy >= tb[1] && cy <= tb[3];
     if (hasBox) {
-      iou = boxIoU(userBox, tb);
+      let bestIou = -1;
+      candBoxes.forEach(cb => {
+        const curIou = boxIoU(userBox, cb);
+        if (curIou > bestIou) { bestIou = curIou; tb = cb; }
+      });
+      iou = Math.max(0, bestIou);
+      const inside = candBoxes.some(cb => cx >= cb[0] && cx <= cb[2] && cy >= cb[1] && cy <= cb[3]);
       if (iou >= 0.35 || (inside && iou >= 0.18)) {
         verdict = 'correct'; semScore = 0.91;
       } else if (iou >= 0.10 || inside) {
         verdict = 'partial'; semScore = 0.56;
       }
-    } else if (inside) {
-      verdict = 'correct'; semScore = 0.92; iou = 0.85;
-    } else if (cx >= tb[0] - 22 && cx <= tb[2] + 22 && cy >= tb[1] - 22 && cy <= tb[3] + 22) {
-      verdict = 'partial'; semScore = 0.54; iou = 0.30;
+    } else {
+      const exactHit = candBoxes.find(cb => cx >= cb[0] && cx <= cb[2] && cy >= cb[1] && cy <= cb[3]);
+      const nearHit = candBoxes.find(cb => cx >= cb[0] - 22 && cx <= cb[2] + 22 && cy >= cb[1] - 22 && cy <= cb[3] + 22);
+      if (exactHit) {
+        tb = exactHit; verdict = 'correct'; semScore = 0.92; iou = 0.85;
+      } else if (nearHit) {
+        tb = nearHit; verdict = 'partial'; semScore = 0.54; iou = 0.30;
+      }
     }
     const after = before.slice();
     if (verdict === 'correct') {

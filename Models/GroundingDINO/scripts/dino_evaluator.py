@@ -311,10 +311,15 @@ class GroundingDINODiagramEvaluator:
         g = self.ground_puzzle(puzzle_id, force_live=force_live)
         gbox = g["grounded_box"]
         tbox = p["target_box"]
+        candidate_boxes = [gbox, tbox]
+        for vb in p.get("valid_boxes") or []:
+            if isinstance(vb, list) and len(vb) == 4:
+                candidate_boxes.append([float(v) for v in vb])
 
         mode = "click"
         iou = 0.0
         clicked_region = None
+        matched_box = gbox
 
         # Determine if student dragged a bounding box (width & height >= 12px)
         has_valid_box = False
@@ -340,8 +345,14 @@ class GroundingDINODiagramEvaluator:
 
         if has_valid_box:
             mode = "box"
-            iou = max(compute_iou(user_box, gbox), compute_iou(user_box, tbox))
-            center_inside = point_in_box(click_x, click_y, gbox, margin=6.0) or point_in_box(click_x, click_y, tbox, margin=6.0)
+            best_iou = -1.0
+            for cbox in candidate_boxes:
+                ciou = compute_iou(user_box, cbox)
+                if ciou > best_iou:
+                    best_iou = ciou
+                    matched_box = cbox
+            iou = max(0.0, best_iou)
+            center_inside = any(point_in_box(click_x, click_y, cbox, margin=6.0) for cbox in candidate_boxes)
             if iou >= 0.35 or (center_inside and iou >= 0.18):
                 verdict = "correct"
                 sem_score = min(0.99, 0.78 + 0.21 * min(iou / 0.65, 1.0))
@@ -356,15 +367,17 @@ class GroundingDINODiagramEvaluator:
                 dmg_mult = 0.0
         else:
             mode = "click"
-            inside_exact = point_in_box(click_x, click_y, gbox, margin=0.0) or point_in_box(click_x, click_y, tbox, margin=0.0)
-            inside_near = point_in_box(click_x, click_y, gbox, margin=22.0) or point_in_box(click_x, click_y, tbox, margin=22.0)
-            if inside_exact:
-                dist = center_distance_norm(click_x, click_y, tbox)
+            exact_hits = [cbox for cbox in candidate_boxes if point_in_box(click_x, click_y, cbox, margin=0.0)]
+            near_hits = [cbox for cbox in candidate_boxes if point_in_box(click_x, click_y, cbox, margin=22.0)]
+            if exact_hits:
+                matched_box = min(exact_hits, key=lambda b: center_distance_norm(click_x, click_y, b))
+                dist = center_distance_norm(click_x, click_y, matched_box)
                 verdict = "correct"
                 sem_score = round(0.85 + 0.14 * (1.0 - dist), 4)
                 iou = round(0.75 + 0.20 * (1.0 - dist), 4)
                 dmg_mult = 1.25
-            elif inside_near:
+            elif near_hits:
+                matched_box = min(near_hits, key=lambda b: center_distance_norm(click_x, click_y, b))
                 verdict = "partial"
                 sem_score = 0.54
                 iou = 0.30
@@ -380,7 +393,7 @@ class GroundingDINODiagramEvaluator:
         elif verdict == "partial":
             feedback = f"GLANCING ALIGNMENT! Your selection partially bordered [{p['target_label']}]. {p['explanation']}"
         else:
-            wrong_txt = f"You selected [{clicked_region}], " if clicked_region else "Your selection missed the target component, "
+            wrong_txt = f"You selected [{clicked_region}], " if clicked_region and clicked_region != p["target_label"] else "Your selection missed the target component, "
             feedback = f"MISALIGNED! {wrong_txt}whereas [{p['target_label']}] is highlighted in green. {p['explanation']}"
 
         return {
@@ -396,7 +409,7 @@ class GroundingDINODiagramEvaluator:
             "clicked_region": clicked_region or "Background / Margin",
             "click_point": [round(click_x, 1), round(click_y, 1)],
             "user_box": [round(float(v), 1) for v in user_box] if has_valid_box else None,
-            "grounded_box": g["grounded_box"],
+            "grounded_box": [round(float(v), 1) for v in matched_box],
             "dino_raw_box": g["dino_raw_box"],
             "dino_confidence": g["dino_confidence"],
             "dino_latency_ms": g["dino_latency_ms"],

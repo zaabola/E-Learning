@@ -247,8 +247,32 @@ def extract_document_text_and_photos(
                     if xref_page_counts.get(xref, 0) > 2:
                         continue
                     try:
-                        base_img = doc.extract_image(xref)
-                        pil_im = Image.open(io.BytesIO(base_img["image"])).convert("RGB")
+                        pil_im = None
+                        try:
+                            rects = page.get_image_rects(xref)
+                            if rects:
+                                r = rects[0]
+                                if r.width >= 60 and r.height >= 45:
+                                    clip_r = fitz.Rect(
+                                        max(page.rect.x0, r.x0 - 3),
+                                        max(page.rect.y0, r.y0 - 3),
+                                        min(page.rect.x1, r.x1 + 3),
+                                        min(page.rect.y1, r.y1 + 3),
+                                    )
+                                    pix = page.get_pixmap(
+                                        clip=clip_r,
+                                        dpi=220,
+                                        colorspace=fitz.csRGB,
+                                        alpha=False,
+                                    )
+                                    if pix.width >= 180 and pix.height >= 120:
+                                        pil_im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                        except Exception:
+                            pil_im = None
+
+                        if pil_im is None:
+                            base_img = doc.extract_image(xref)
+                            pil_im = Image.open(io.BytesIO(base_img["image"])).convert("RGB")
                         score = _diagram_quality_score(pil_im)
                         if score <= 0.0:
                             continue
@@ -460,7 +484,19 @@ def extract_document_text_and_photos(
 
     saved_items = []
     for idx, item in enumerate(balanced):
-        fitted, fit_rect = _fit_diagram_canvas(item["pil_img"], 720, 420)
+        src_im = item["pil_img"].convert("RGB")
+        max_dim = max(src_im.size)
+        if max_dim > 1280:
+            s_cap = 1280.0 / float(max_dim)
+            src_im = src_im.resize(
+                (max(1, int(round(src_im.width * s_cap))), max(1, int(round(src_im.height * s_cap)))),
+                Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC,
+            )
+        hires_fname = f"p{item['page']}_fig{idx}_hires.png"
+        abs_hires = os.path.join(diag_dir, hires_fname)
+        src_im.save(abs_hires, "PNG")
+
+        fitted, fit_rect = _fit_diagram_canvas(src_im, 720, 420)
         fname = f"p{item['page']}_fig{idx}.png"
         abs_p = os.path.join(diag_dir, fname)
         fitted.save(abs_p, "PNG")
@@ -471,6 +507,8 @@ def extract_document_text_and_photos(
                 "slide_text": item["slide_text"],
                 "diagram_file": f"course_material/{course_id}/diagrams/{fname}",
                 "abs_path": abs_p,
+                "abs_source_path": abs_hires,
+                "source_size": src_im.size,
                 "fit_rect": fit_rect,
                 "score": item["score"],
             }
@@ -665,6 +703,9 @@ def ingest_custom_course_package(
                     concept_title=c_hint,
                     slide_context=cand["slide_text"],
                     use_reference_cache=False,  # CRITICAL: NEVER mix old YOLO/OCR cache!
+                    source_image_path=cand.get("abs_source_path"),
+                    fit_rect=cand.get("fit_rect"),
+                    dino_evaluator=dino_evaluator,
                 )
                 # Refresh vlm_name in case load_live_vlm() fell back to Qwen2.5-VL-7B
                 vlm_name = getattr(vlm_engine, "short_model_name", vlm_name)
@@ -789,13 +830,15 @@ def ingest_custom_course_package(
 
             vlm_box_px = [float(v) for v in comp.get("vlm_box_px", [60.0, 80.0, 340.0, 340.0])]
             raw_valid_boxes = comp.get("valid_boxes") or [vlm_box_px]
+            som_verified = bool(comp.get("som_verified", False))
+            som_confidence = float(comp.get("som_confidence", 0.88 if som_verified else 0.48))
+            som_num_cands = int(comp.get("som_num_candidates", 1))
             grounding_tier = comp.get("grounding_tier", f"{vlm_name}-FP16")
             refined_box = vlm_box_px
 
-            # Refine with LLMDet-Large / Grounding-DINO via:
-            #   1) High-IoU consensus sharpening (`IoU >= 0.40`), OR
-            #   2) Blank-margin rescue when VLM drifted onto empty white space beside a real component!
-            if dino_evaluator is not None and os.path.exists(abs_diag):
+            # Only run 720x420 fallback DINO alignment when the component was NOT already
+            # verified on the native-res source image via Set-of-Mark + Crop Verification!
+            if (not som_verified) and dino_evaluator is not None and os.path.exists(abs_diag):
                 try:
                     pil_im = Image.open(abs_diag).convert("RGB")
                     refined_box = trim_blank_margins(pil_im, refined_box)
@@ -906,6 +949,9 @@ def ingest_custom_course_package(
                     "target_label": t_label,
                     "dino_prompt": d_prompt,
                     "grounding_tier": grounding_tier,
+                    "som_verified": som_verified,
+                    "som_confidence": som_confidence,
+                    "som_num_candidates": som_num_cands,
                     "vlm_box_1000": b1000,
                     "vlm_box_px": refined_box,
                     "valid_boxes": final_valid_boxes,
@@ -928,6 +974,9 @@ def ingest_custom_course_package(
                     "target_label": fc["target_label"],
                     "dino_prompt": fc["dino_prompt"],
                     "grounding_tier": fc.get("grounding_tier", "fallback"),
+                    "som_verified": fc.get("som_verified", False),
+                    "som_confidence": fc.get("som_confidence", 0.85),
+                    "som_num_candidates": fc.get("som_num_candidates", 1),
                     "prompt": fc["lab_question"],
                     "target_box": fc["ground_truth_box_px"],
                     "valid_boxes": fc.get("valid_boxes", [fc["ground_truth_box_px"]]),

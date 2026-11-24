@@ -56,8 +56,12 @@ VLM_SYSTEM_PROMPT = (
     "You are an expert University Professor and Multimodal Curriculum Architect. "
     "Inspect ONLY the provided technical slide/diagram image and its slide text context. "
     "Write questions and summaries in the SAME language as the slide (French if the slide is in French, English if in English). "
-    "CRITICAL: For each component's `target_label`, copy the EXACT verbatim text printed inside a visible box, cylinder, cloud, oval, or table row in THIS image (e.g. 'DBWn', 'Cache de tampons de la base de données', 'DBA') — NEVER translate printed labels and NEVER use placeholder words! "
-    "Pick 2 visually DISTINCT, NON-REPEATED components in the figure: prefer whole boxes, cylinders, clouds, or unique section headers (e.g. 'DESCRIBE DICTIONARY', 'Base de données', 'Mémoire SGA') rather than generic column names like 'TABLE_NAME' or 'COMMENTS' that appear multiple times in the same image! "
+    "CRITICAL: For each component's `target_label`, copy the EXACT verbatim text printed inside a visible box, cylinder, cloud, oval, or table cell in THIS image (e.g. 'DBWn', '$regex', 'Cache de tampons de la base de données', 'DBA') — NEVER translate printed labels and NEVER use placeholder words! "
+    "Pick 2 visually DISTINCT components in the figure: prefer concise boxes, cylinders, clouds, commands, operators, or unique section headers rather than huge multi-line paragraphs or generic repeated headers when shorter distinct components exist. "
+    "CRITICAL FOR `lab_question`: Write a REAL conceptual/quiz question asking the student to FIND and CLICK/SELECT that component in the figure based on its ROLE, PURPOSE, BEHAVIOR, or MEANING — STRICTLY WITHOUT writing, quoting, or spoiling `target_label` inside `lab_question`! "
+    "Example GOOD `lab_question` (for target_label='$regex'): 'Quel opérateur MongoDB permet de rechercher un motif dans une chaîne de caractères ? Sélectionne-le sur le tableau !' "
+    "Example GOOD `lab_question` (for target_label='SMON'): 'Which background process handles automatic instance recovery after a crash? Click or box it in the diagram!' "
+    "Example BAD `lab_question` (FORBIDDEN!): 'Click or drag a box around SMON shown in this figure.' "
     "Keep every string concise (1 short sentence). Return ONLY a valid JSON object matching this schema:\n"
     "{\n"
     '  "is_educational_diagram": true,\n'
@@ -68,11 +72,13 @@ VLM_SYSTEM_PROMPT = (
     "    {\n"
     '      "target_label": "EXACT verbatim printed text of component 1 in image",\n'
     '      "dino_prompt": "short English visual description of component 1 container ending with a period.",\n'
+    '      "lab_question": "1 real quiz question asking the student to find component 1 by its role/meaning WITHOUT naming target_label!",\n'
     '      "explanation": "1 concise sentence explaining what component 1 does"\n'
     "    },\n"
     "    {\n"
     '      "target_label": "EXACT verbatim printed text of component 2 in image",\n'
     '      "dino_prompt": "short English visual description of component 2 container ending with a period.",\n'
+    '      "lab_question": "1 real quiz question asking the student to find component 2 by its role/meaning WITHOUT naming target_label!",\n'
     '      "explanation": "1 concise sentence explaining what component 2 does"\n'
     "    }\n"
     "  ],\n"
@@ -89,6 +95,73 @@ VLM_SYSTEM_PROMPT = (
     "  }\n"
     "}"
 )
+
+
+def _question_leaks_label(question: str, target_label: str) -> bool:
+    """Returns True if `question` spoils `target_label` verbatim or is a placeholder."""
+    q_low = re.sub(r"\s+", " ", str(question or "")).strip().lower()
+    t_low = re.sub(r"\s+", " ", str(target_label or "")).strip().lower()
+    if not q_low or len(q_low) < 12 or not t_low:
+        return True
+    if "[target_label]" in q_low or "target_label" in q_low:
+        return True
+    if q_low.startswith("click or drag a box around"):
+        return True
+    # Exact token-bounded match for short/medium labels (e.g. '$regex', 'SMON', 'SQL', 'mongod')
+    if len(t_low) >= 3:
+        pat = (r"(?<!\w)" if t_low[0].isalnum() else "") + re.escape(t_low) + (r"(?!\w)" if t_low[-1].isalnum() else "")
+        if re.search(pat, q_low):
+            return True
+    # Heavy word-overlap check for long multi-word labels (prevents verbatim copy-paste giveaways)
+    stop = {"the", "and", "for", "with", "that", "from", "les", "des", "une", "dans", "pour", "avec", "sur", "par", "est", "qui", "que"}
+    t_words = [w for w in re.findall(r"[0-9a-zA-ZÀ-ÿ$_.()/-]{3,}", t_low) if w not in stop]
+    if len(t_words) >= 4:
+        hits = sum(1 for w in t_words if w in q_low)
+        if hits / float(len(t_words)) >= 0.78:
+            return True
+    return False
+
+
+def _build_challenge_question(
+    raw_q: str,
+    target_label: str,
+    explanation: str = "",
+    concept_title: str = "",
+) -> str:
+    """
+    Returns a real conceptual visual-search question that asks the student to locate
+    the right component in the figure WITHOUT giving away `target_label` verbatim.
+    """
+    cand = re.sub(r"\s+", " ", str(raw_q or "")).strip()
+    if cand and not _question_leaks_label(cand, target_label):
+        if cand[-1] not in "?!.":
+            cand += "?"
+        return cand
+
+    # Fallback: build a clean non-spoiler question from `explanation` in the slide's language
+    exp = re.sub(r"\s+", " ", str(explanation or "")).strip()
+    is_fr = bool(
+        re.search(r"[éèêëàâçùûîïôœ]", exp + " " + str(concept_title or ""), re.IGNORECASE)
+        or re.search(r"\b(le|la|les|des|une|dans|pour|permet|base de données|serveur)\b", exp, re.IGNORECASE)
+    )
+    t_clean = re.sub(r"\s+", " ", str(target_label or "")).strip()
+    masked_exp = exp
+    if t_clean and len(t_clean) >= 3 and masked_exp:
+        pat = (r"(?<!\w)" if t_clean[0].isalnum() else "") + re.escape(t_clean) + (r"(?!\w)" if t_clean[-1].isalnum() else "")
+        replacement = "cet élément" if is_fr else "this component"
+        masked_exp = re.sub(pat, replacement, masked_exp, flags=re.IGNORECASE).strip()
+        masked_exp = re.sub(r"^['\"`\[]*cet élément['\"`\]]*\s*", "", masked_exp, flags=re.IGNORECASE).strip()
+        masked_exp = re.sub(r"^['\"`\[]*this component['\"`\]]*\s*", "", masked_exp, flags=re.IGNORECASE).strip()
+
+    if masked_exp and len(masked_exp) >= 12 and not _question_leaks_label(masked_exp, t_clean):
+        masked_exp = masked_exp.rstrip(".!?")
+        if is_fr:
+            return f"Quel élément de cette figure correspond à ce rôle : {masked_exp} ? Clique ou encadre-le !"
+        return f"Which component in this figure serves this role: {masked_exp}? Click or drag a box around it!"
+
+    if is_fr:
+        return f"Identifie sur cette figure le composant clé lié à '{concept_title or 'ce concept'}' (indice : {len(t_clean)} caractères). Clique ou encadre-le !"
+    return f"Locate the key component related to '{concept_title or 'this concept'}' in this figure. Click or drag a box around it!"
 
 
 def box_1000_to_pixel(box_1000, width: int, height: int) -> list:
@@ -1245,7 +1318,7 @@ class QwenVLDiagramEngine:
         concept_id: int = 0,
         concept_title: str = "",
         slide_context: str = "",
-        max_new_tokens: int = 950,
+        max_new_tokens: int = 1050,
         use_reference_cache: bool = False,
     ) -> dict:
         """
@@ -1287,7 +1360,8 @@ class QwenVLDiagramEngine:
             f"{ctx_block}\n"
             "1. Decide if this image is a meaningful technical/educational diagram/chart (`is_educational_diagram`: true) "
             "or just a decorative logo/cover icon (`is_educational_diagram`: false).\n"
-            "2. Select 2 distinct, clearly labeled visual components INSIDE THIS EXACT IMAGE. Copy their EXACT verbatim text labels printed on the image (do NOT translate French labels into English!).\n"
+            "2. Select 2 distinct, clearly labeled visual components INSIDE THIS EXACT IMAGE. Copy their EXACT verbatim text labels into `target_label` (do NOT translate printed labels!). "
+            "For each component's `lab_question`, write a REAL conceptual question asking the student to find and click/box that component by its function/purpose/meaning — NEVER write or quote `target_label` in `lab_question`!\n"
             "3. Generate 2 concise multiple-choice questions (`mc_questions`) and 1 concise VQA (`vqa_challenge`) strictly about THIS image and slide text. "
             "Keep every string concise (1 short sentence). Return ONLY strict JSON."
         )
@@ -1452,10 +1526,16 @@ class QwenVLDiagramEngine:
                 round(px_box[3] * 1000.0 / max(1.0, float(height))),
             ]
             raw_lab_q = (rc.get("lab_question") if use_reference_cache else None) or lc.get("lab_question") or ""
-            if (not use_reference_cache) or (not raw_lab_q) or ("[target_label]" in raw_lab_q.lower()) or ("target_label" in raw_lab_q.lower()):
-                lab_q_final = f"Click or drag a box around '{t_label}' shown in this figure."
-            else:
+            comp_exp = lc.get("explanation") or rc.get("explanation") or parsed["visual_summary"]
+            if use_reference_cache and raw_lab_q and not _question_leaks_label(raw_lab_q, t_label):
                 lab_q_final = raw_lab_q
+            else:
+                lab_q_final = _build_challenge_question(
+                    raw_q=raw_lab_q,
+                    target_label=str(t_label),
+                    explanation=str(comp_exp),
+                    concept_title=str(parsed["concept_title"]),
+                )
             comp_item = {
                 "component_id": rc.get("component_id", f"c{concept_id}_p{idx + 1}"),
                 "target_label": str(t_label),
@@ -1466,8 +1546,8 @@ class QwenVLDiagramEngine:
                 "valid_boxes": valid_boxes,
                 "ground_truth_box_px": rc.get("ground_truth_box_px", px_box) if use_reference_cache else px_box,
                 "lab_question": lab_q_final,
-                "socratic_hint": lc.get("socratic_hint") or rc.get("socratic_hint") or f"Look closely for '{t_label}' in this figure.",
-                "explanation": lc.get("explanation") or rc.get("explanation") or parsed["visual_summary"],
+                "socratic_hint": lc.get("socratic_hint") or rc.get("socratic_hint") or "Inspect the labels and match the component's role in this diagram.",
+                "explanation": comp_exp,
             }
             normalized_comps.append(comp_item)
         parsed["components"] = normalized_comps

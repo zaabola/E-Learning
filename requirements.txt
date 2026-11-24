@@ -1,0 +1,16 @@
+# Install PyTorch with CUDA first, using the selector on https://pytorch.org/get-started/locally/
+# (otherwise pip installs a CPU-only build). Then: pip install -r requirements.txt
+numpy
+opencv-python
+mediapipe
+hsemotion-onnx
+onnxruntime
+sounddevice
+silero-vad
+praat-parselmouth
+transformers
+faster-whisper
+rich
+pyttsx3        # spoken tips (--speak / v key); offline Windows voices
+# optional: tips worded by Claude (--llm claude). Ollama needs no Python package.
+# anthropic

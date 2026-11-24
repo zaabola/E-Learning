@@ -205,6 +205,23 @@ const Overworld = (() => {
     if (ch === 'b') { await UI.say('Field guides, maps, and research notebooks on learning algorithms.'); return; }
   }
 
+  const NPC_PERSONA_MAP = {
+    mom:       { key: 'mom',       speaker: 'MOM' },
+    rival_mom: { key: 'rival_mom', speaker: "REX'S MOM" },
+    prof:      { key: 'prof_ada',  speaker: 'PROF. ADA' },
+    rex:       { key: 'tr_rex',    speaker: 'RIVAL REX' },
+    hv1:       { key: 'hv1',       speaker: 'BRAM' },
+    hv2:       { key: 'hv2',       speaker: 'LUNA' },
+    cal:       { key: 'tr_cal',    speaker: 'SCOUT CAL' },
+    mira:      { key: 'tr_mira',   speaker: 'MIRA' },
+    sv1:       { key: 'sv1',       speaker: 'GARR' },
+    sv2:       { key: 'sv2',       speaker: 'PIPA' },
+    nurse1:    { key: 'nurse',     speaker: 'NURSE JOYCE' },
+    clerk1:    { key: 'clerk',     speaker: 'CLERK OTTO' },
+    rocco:     { key: 'tr_rocco',  speaker: 'ROCCO' },
+    mason:     { key: 'tr_mason',  speaker: 'LEADER MASON' },
+  };
+
   function getStoryGreeting(npcKey, fallbackText) {
     const story = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
     if (story && story.npc_greetings && story.npc_greetings[npcKey]) {
@@ -228,12 +245,14 @@ const Overworld = (() => {
     if (npc.special === 'prof') return profFlow();
     if (npc.special === 'parent') return parentFlow();
     if (npc.trainer) return trainerFlow(npc);
-    const greet = getStoryGreeting('villager', (npc.dialog && npc.dialog[0]) || 'TOWNIE: Lovely day for studying!');
+    const meta = NPC_PERSONA_MAP[npc.id] || { key: 'villager', speaker: 'TOWNIE' };
+    const fallbackGreet = (npc.dialog && npc.dialog[0]) || `${meta.speaker}: Lovely day for studying!`;
+    const greet = getStoryGreeting(meta.key, fallbackGreet);
     await UI.say(greet);
     if (UI.npcChatModal) {
-      const pick = await askNpcChoice('Chat with this townie about your course?', ['ASK ABOUT COURSE', 'BYE']);
+      const pick = await askNpcChoice(`Chat with ${meta.speaker} about your course?`, ['ASK ABOUT COURSE', 'BYE']);
       if (pick === 0) {
-        await UI.npcChatModal({ npcKey: 'villager', speaker: 'TOWNIE', greeting: greet });
+        await UI.npcChatModal({ npcKey: meta.key, speaker: meta.speaker, greeting: greet });
       }
     }
   }
@@ -242,15 +261,10 @@ const Overworld = (() => {
     const f = Game.player.flags;
     const momGreet = getStoryGreeting('mom', 'MOM: Up already? Today is the day your KnowledgeQuest research begins!');
     if (!f.sent_off) {
-      const story = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
-      const lines = [momGreet];
-      if (story && Array.isArray(story.story_intro) && story.story_intro.length) {
-        lines.push(story.story_intro[0]);
-      } else {
-        lines.push('MOM: Professor ADA sent word from the laboratory. She needs your help restoring the Knowledge Network.');
-      }
-      lines.push('MOM: I packed a POTION in your bag — and remember, you can ask anyone in town questions about your course!');
-      await UI.sayLines(lines);
+      await UI.sayLines([
+        momGreet,
+        "MOM: I packed a POTION in your bag — go see Prof. ADA at her lab, and ask anyone in town about your course!",
+      ]);
       Game.player.bag.potion = (Game.player.bag.potion || 0) + 1;
       UI.toast('Got a Potion!');
       f.sent_off = true;
@@ -278,11 +292,11 @@ const Overworld = (() => {
   }
 
   async function nurseFlow() {
-    const greet = getStoryGreeting('nurse', 'NURSE: Welcome to the POKEMON CENTER.');
+    const greet = getStoryGreeting('nurse', 'NURSE JOYCE: Welcome to the POKEMON CENTER.');
     await UI.say(greet);
-    const pick = await askNpcChoice('NURSE: How can I help today?', ['HEAL TEAM', 'ASK ABOUT COURSE', 'BYE']);
+    const pick = await askNpcChoice('NURSE JOYCE: How can I help today?', ['HEAL TEAM', 'ASK ABOUT COURSE', 'BYE']);
     if (pick === 1 && UI.npcChatModal) {
-      await UI.npcChatModal({ npcKey: 'nurse', speaker: 'NURSE', greeting: greet });
+      await UI.npcChatModal({ npcKey: 'nurse', speaker: 'NURSE JOYCE', greeting: greet });
       return;
     }
     if (pick !== 0) { await UI.say('NURSE: Of course. We are here whenever you need us.'); return; }
@@ -304,11 +318,11 @@ const Overworld = (() => {
   }
 
   async function shopFlow() {
-    const greet = getStoryGreeting('clerk', 'CLERK: Welcome to the POKE MART, trainer! Potions for bruises, study tips on the house!');
+    const greet = getStoryGreeting('clerk', 'CLERK OTTO: Welcome to the POKE MART, trainer! Potions for bruises, study tips on the house!');
     await UI.say(greet);
-    const pick = await askNpcChoice('CLERK: What catches your eye?', ['BROWSE SHOP', 'ASK ABOUT COURSE', 'BYE']);
+    const pick = await askNpcChoice('CLERK OTTO: What catches your eye?', ['BROWSE SHOP', 'ASK ABOUT COURSE', 'BYE']);
     if (pick === 1 && UI.npcChatModal) {
-      await UI.npcChatModal({ npcKey: 'clerk', speaker: 'CLERK', greeting: greet });
+      await UI.npcChatModal({ npcKey: 'clerk', speaker: 'CLERK OTTO', greeting: greet });
       return;
     }
     if (pick !== 0) { await UI.say('CLERK: Safe roads out there. Mind the tall grass!'); return; }
@@ -318,27 +332,19 @@ const Overworld = (() => {
 
   async function profFlow() {
     const f = Game.player.flags;
-    const story = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
+    const adaGreet = getStoryGreeting('prof_ada', 'ADA: Ah, welcome! I am Professor ADA of the Willowbrook Research Lab.');
     if (!f.starter) {
-      if (story && Array.isArray(story.story_intro) && story.story_intro.length) {
-        await UI.sayLines([
-          ...story.story_intro,
-          'ADA: Choose a research companion from those three consoles: BULBASAUR, CHARMANDER, or SQUIRTLE!',
-        ]);
-      } else {
-        await UI.sayLines([
-          "ADA: Ah, welcome! I am Professor ADA of the Willowbrook Research Lab.",
-          'ADA: Talk to anyone in town to ask questions about your course, and battle trainers to level up your DKT Mastery!',
-          'ADA: Choose a companion from those three consoles: BULBASAUR, CHARMANDER, or SQUIRTLE.',
-        ]);
-      }
+      await UI.sayLines([
+        adaGreet,
+        'ADA: Pick your research partner from those three consoles: BULBASAUR, CHARMANDER, or SQUIRTLE!',
+      ]);
       if (UI.npcChatModal) {
-        const askNow = await askNpcChoice('ADA: Ready to start, or want to ask about the course?', ['PICK STARTER', 'ASK ADA']);
+        const askNow = await askNpcChoice('ADA: Ready to pick a starter, or want to ask about the course?', ['PICK STARTER', 'ASK ADA']);
         if (askNow === 1) {
           await UI.npcChatModal({
             npcKey: 'prof_ada',
             speaker: 'PROF. ADA',
-            greeting: getStoryGreeting('prof_ada', 'ADA: Ask me anything about this course!'),
+            greeting: adaGreet,
           });
         }
       }

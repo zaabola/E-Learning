@@ -52,35 +52,43 @@ STYLIZER_SYSTEM_PROMPT = (
 PERSONA_PROFILES = {
     "tr_rex": {
         "speaker": "REX",
-        "archetype": "cocky, data-obsessed rival who tracks every decimal of your stats and hates losing",
+        "archetype": "cocky, sarcastic, data-obsessed rival who roasts you for sleeping in, brags about benchmarking the whole course before breakfast, and tracks every decimal of your stats",
     },
-    "tr_cal": {
-        "speaker": "CAL",
-        "archetype": "energetic trail scout who treats every battle like a thrilling field experiment",
-    },
-    "tr_mira": {
-        "speaker": "MIRA",
-        "archetype": "razor-sharp, sarcastic strategist who tests precision and penalizes sloppy guesses",
-    },
-    "tr_rocco": {
-        "speaker": "ROCCO",
-        "archetype": "gruff, practical veteran researcher who respects gritty effort over flashy talk",
-    },
-    "tr_mason": {
-        "speaker": "MASON",
-        "archetype": "stoic, imposing Gym Leader who speaks in terse stone-and-foundation metaphors",
-    },
-    "prof_ada": {
-        "speaker": "ADA",
-        "archetype": "warm, encouraging, gently witty lead professor who cracks dry academic jokes and translates DKT metrics into clear study strategy",
+    "rival_mom": {
+        "speaker": "MRS. VANCE",
+        "archetype": "warm, gossipy next-door neighbor (Rex's mom) who lovingly embarrasses Rex by spilling stories about him muttering course terms in his sleep and guzzling espresso before dawn",
     },
     "mom": {
         "speaker": "MOM",
-        "archetype": "loving, hilariously overprotective RPG mom who compares tough university concepts to laundry, soup, and forgetting your jacket",
+        "archetype": "loving, hilariously overprotective RPG mom who compares tough university concepts to soup, sweaters, and doing the dishes",
     },
-    "villager": {
-        "speaker": "TOWNIE",
-        "archetype": "quirky, gossipy Willowbrook villager with deadpan RPG humor who overhears rumors about the course and drops sneaky study clues",
+    "prof_ada": {
+        "speaker": "ADA",
+        "archetype": "brilliant, coffee-fueled lead professor who cracks dry academic jokes and translates DKT metrics into clear study strategy",
+    },
+    "hv1": {
+        "speaker": "BRAM",
+        "archetype": "dramatic, slightly paranoid Willowbrook old-timer terrified of tall grass and wild bugs who delivers over-the-top doom warnings mixed with sneaky study clues",
+    },
+    "hv2": {
+        "speaker": "LUNA",
+        "archetype": "hyper-caffeinated systems-theory fangirl obsessed with underlying rules, elegance, and clean mental models who talks excitedly with nerdy enthusiasm",
+    },
+    "tr_cal": {
+        "speaker": "CAL",
+        "archetype": "energetic trail scout who treats every quiz like an extreme outdoor field expedition",
+    },
+    "tr_mira": {
+        "speaker": "MIRA",
+        "archetype": "razor-sharp, deadpan sarcastic strategist who roasts sloppy guesses while calmly sipping lemonade",
+    },
+    "sv1": {
+        "speaker": "GARR",
+        "archetype": "dramatic, battle-scarred Stonegate Gym veteran who barely survived Mason's boss exam and whispers intense survival tips",
+    },
+    "sv2": {
+        "speaker": "PIPA",
+        "archetype": "upbeat, gossipy Stonegate bird-lover who raves about the healing machine and jokes about sleep-deprived students cramming before the gym",
     },
     "nurse": {
         "speaker": "NURSE",
@@ -88,7 +96,19 @@ PERSONA_PROFILES = {
     },
     "clerk": {
         "speaker": "CLERK",
-        "archetype": "fast-talking Poke Mart merchant who pitches study facts like limited-time bargain deals",
+        "archetype": "fast-talking Poke Mart hustler who pitches potions and study facts like limited-time infomercial deals",
+    },
+    "tr_rocco": {
+        "speaker": "ROCCO",
+        "archetype": "gruff, practical veteran researcher who treats tough concepts like lifting heavy boulders",
+    },
+    "tr_mason": {
+        "speaker": "MASON",
+        "archetype": "stoic, imposing Granite Gym Leader who speaks in terse stone-and-foundation metaphors and demands deep synthesis",
+    },
+    "villager": {
+        "speaker": "TOWNIE",
+        "archetype": "quirky, gossipy Willowbrook villager with deadpan RPG humor who overhears rumors about the course and drops sneaky study clues",
     },
     "wild": {
         "speaker": "NARRATOR",
@@ -658,19 +678,24 @@ class PersonaStylizerLLM:
                 "story_intro": [
                     f"ALERTE LABO : Les archives de '{course_title[:36]}' ont disjoncté dans tout Willowbrook !",
                     f"ADA : Les chercheurs CAL, MIRA, ROCCO et MASON gardent les secrets de {titles[0][:24]} jusqu'à {titles[4][:24]}.",
-                    "ADA : Parle aux habitants, pose-leur tes questions sur le cours, et bats les champions pour restaurer le réseau !",
+                    "ADA : Parle à chaque habitant et champion pour glaner des indices uniques, puis restaure le réseau !",
                 ],
                 "npc_greetings": {
-                    "prof_ada": f"ADA : Mon café a refroidi en lisant '{course_title[:28]}'... Pose-moi n'importe quelle question sur le cours !",
-                    "mom": f"MAMAN : Tu révises '{course_title[:26]}' ? Prends ton pull et ne confonds pas {titles[0][:22]} avec la vaisselle !",
-                    "villager": f"HABITANT : Psst ! On raconte que MASON pose des pièges sur {titles[4][:24]}. Demande-moi un indice avant d'y aller !",
-                    "nurse": f"INFIRMIÈRE : Cerveau en surchauffe à cause de {titles[1][:24]} ? On soigne ton équipe et je peux résumer le cours !",
-                    "clerk": f"VENDEUR : Promo du jour : 1 Potion achetée = 1 astuce gratuite sur {titles[2][:24]} ! Pose ta question !",
-                    "tr_rex": f"REX : J'ai déjà mémorisé tout '{course_title[:24]}' pendant mon petit-déj. Tu veux des infos ou un vrai duel ?",
-                    "tr_cal": f"CAL : Salut ! Sur le sentier, je teste {titles[1][:26]} ! Tu veux un tuyau rapide ou tu lances le combat ?",
-                    "tr_mira": f"MIRA : Pas de blabla sur {titles[2][:26]}. Demande un éclaircissement si tu doutes, sinon prouve ta maîtrise !",
-                    "tr_rocco": f"ROCCO : {titles[3][:26]}, c'est du sérieux, gamin ! Pose tes questions avant ou affronte-moi direct !",
-                    "tr_mason": f"MASON : Ici repose l'épreuve ultime de {titles[4][:26]}. Interroge-moi pour te préparer, ou défie le roc !",
+                    "prof_ada": f"ADA : Mon 4e café a refroidi sur '{course_title[:24]}'... Viens, j'ai besoin d'un vrai cerveau pour déboguer ça !",
+                    "mom": f"MAMAN : Tu révises '{course_title[:24]}' à jeun ?! Prends ta veste et ne confonds pas {titles[0][:18]} avec la soupe !",
+                    "rival_mom": f"MME VANCE : Chut ! REX a marmonné '{titles[0][:22]}' toute la nuit en avalant 5 espressos avant l'aube...",
+                    "tr_rex": f"REX : Enfin réveillé ? J'ai déjà indexé '{course_title[:22]}' avant mon petit-déj. Choisis vite ta créature !",
+                    "hv1": f"BRAM : Malheureux ! Ne mets PAS un pied dans les hautes herbes sans partenaire—des bugs de {titles[1][:20]} rôdent !",
+                    "hv2": f"LUNA : Oh trop bien ! T'as vu l'élégance des règles derrière {titles[2][:24]} ? Le chaos n'a aucune chance !",
+                    "tr_cal": f"CAL : Sac bouclé, boussole prête ! Sur ce sentier, c'est moi qui teste ton flair sur {titles[1][:22]} !",
+                    "tr_mira": f"MIRA : *sirote sa limonade* Ici l'à-peu-près sur {titles[2][:22]} ne passe pas. Pense clair ou rentre réviser.",
+                    "sv1": f"GARR : J'ai survécu de justesse à MASON sur {titles[4][:22]}... N'y va pas avec des attaques molles, gamin !",
+                    "sv2": f"PIPA : La machine du Centre a requinqué mon Pidgey en deux secondes—dommage qu'elle révise pas {titles[3][:20]} à ma place !",
+                    "nurse": f"INFIRMIÈRE : Cerveau en surchauffe sur {titles[1][:22]} ? Installe ton équipe ici, on soigne corps et neurones !",
+                    "clerk": f"VENDEUR : Affaire du siècle : 1 Potion achetée, 1 tuyau malin sur {titles[2][:20]} offert ! Qui dit mieux ?",
+                    "tr_rocco": f"ROCCO : {titles[3][:24]}, c'est du granit pur, gamin ! Voyons si tes bases plient sous le poids !",
+                    "tr_mason": f"MASON : La roche ne cède qu'à la maîtrise totale de {titles[4][:22]}. Montre-moi des fondations solides.",
+                    "villager": f"HABITANT : On chuchote partout à Willowbrook que '{course_title[:26]}' va décider du prochain champion !",
                 },
                 "source": "story_template",
                 "model_name": f"{self.short_name} (Fallback)",
@@ -683,19 +708,24 @@ class PersonaStylizerLLM:
                 "story_intro": [
                     f"LAB ALERT: Willowbrook's '{course_title[:34]}' knowledge grid just scrambled itself into chaos!",
                     f"ADA: Scouts CAL, MIRA, ROCCO, and Boss MASON guard the pillars from {titles[0][:22]} to {titles[4][:22]}.",
-                    "ADA: Chat with any villager or trainer to quiz them for clues, then battle your way to full mastery!",
+                    "ADA: Chat with every townie, mom, and trainer for their own take—then battle your way to mastery!",
                 ],
                 "npc_greetings": {
-                    "prof_ada": f"ADA: My coffee went cold decoding '{course_title[:26]}'—ask me anything about this course!",
-                    "mom": f"MOM: Studying '{course_title[:26]}' already? Pack a sweater and don't confuse {titles[0][:22]} with laundry!",
-                    "villager": f"TOWNIE: Psst! Word is MASON's boss trial ambushes folks on {titles[4][:22]}. Ask me for gossip or study clues!",
-                    "nurse": f"NURSE: Brain fried from {titles[1][:24]}? We'll heal your team—and ask me if you need a quick refresher!",
-                    "clerk": f"CLERK: Special deal: Potions on shelf 2, free study tips on {titles[2][:22]} right here! What do you wanna know?",
-                    "tr_rex": f"REX: I benchmarked all of '{course_title[:24]}' before breakfast. Need tutoring, or ready to lose?",
-                    "tr_cal": f"CAL: Hey! I'm scouting {titles[1][:26]} on this trail—want a quick tip first, or straight to battle?",
-                    "tr_mira": f"MIRA: No hand-waving on {titles[2][:26]}. Ask a smart question first, or step up and prove your logic.",
-                    "tr_rocco": f"ROCCO: {titles[3][:26]} takes real grit, kid! Pick my brain for field notes or jump into the fight!",
-                    "tr_mason": f"MASON: Bedrock guards the final trial of {titles[4][:26]}. Ask for wisdom first, or challenge Stonegate!",
+                    "prof_ada": f"ADA: Cup #4 of coffee went cold decoding '{course_title[:24]}'... Come help me untangle this glorious mess!",
+                    "mom": f"MOM: Tackling '{course_title[:24]}' without breakfast?! Grab a sweater and don't mix up {titles[0][:18]} with laundry!",
+                    "rival_mom": f"MRS. VANCE: Don't tell REX, but he muttered '{titles[0][:22]}' in his sleep and chugged five espressos at 5 AM!",
+                    "tr_rex": f"REX: Finally rolled out of bed? I benchmarked all of '{course_title[:22]}' before sunrise. Pick your partner already!",
+                    "hv1": f"BRAM: Hold it right there, kid! Wild {titles[1][:22]} bugs in that tall grass will eat unprepared rookies alive!",
+                    "hv2": f"LUNA: Ooh! Have you noticed how cleanly every rule in {titles[2][:22]} fits together?! System design is SO cool!",
+                    "tr_cal": f"CAL: Boots laced, field log open! Out here on Fernway Trail, let's stress-test your {titles[1][:22]} instincts!",
+                    "tr_mira": f"MIRA: *sips iced lemonade* Hand-waving on {titles[2][:22]} gets shredded fast here. Think sharp or step aside.",
+                    "sv1": f"GARR: Listen close—I barely walked out of MASON's {titles[4][:22]} trial intact. Chip damage won't scratch him!",
+                    "sv2": f"PIPA: That Center machine healed my Pidgey in two seconds—too bad it can't cram {titles[3][:20]} into my brain too!",
+                    "nurse": f"NURSE: Brain overheating from {titles[1][:22]}? Drop off your team here—we fix bruised HP and fried neurons!",
+                    "clerk": f"CLERK: Today ONLY: Potions on aisle 2, priceless rumors about {titles[2][:20]} free at checkout! Whaddaya need?",
+                    "tr_rocco": f"ROCCO: {titles[3][:24]} takes real grit, kid—none of that glossy textbook fluff. Let's see your backbone!",
+                    "tr_mason": f"MASON: Bedrock cares nothing for lucky guesses. Prove unshakable command over {titles[4][:22]} to pass.",
+                    "villager": f"TOWNIE: Folks all over Willowbrook are buzzing about '{course_title[:26]}'—ask anyone for local intel!",
                 },
                 "source": "story_template",
                 "model_name": f"{self.short_name} (Fallback)",
@@ -708,11 +738,28 @@ class PersonaStylizerLLM:
         concept_list = [f"C{i}: {t}" for i, t in enumerate(titles)]
         sys_msg = (
             "You are Model #7, a hilarious, witty Retro-GBA RPG Storyteller and Persona Stylizer. "
-            f"Write strictly in {lang}. Turn the uploaded university course into a funny, memorable retro-RPG adventure! "
-            "Every line must be punchy (<= 132 characters), have genuine humor and personality, reference the course's "
-            "real topics accurately, and invite the player to ask NPCs questions about the course. "
-            "Output ONLY a strict JSON object with keys: `quest_title`, `story_intro` (list of 3 short strings), "
-            "and `npc_greetings` (dict with keys: `prof_ada`, `mom`, `villager`, `nurse`, `clerk`, `tr_rex`, `tr_cal`, `tr_mira`, `tr_rocco`, `tr_mason`)."
+            f"Write strictly in {lang}. Turn the uploaded university course into a funny, memorable retro-RPG adventure "
+            "where EVERY SINGLE NPC has a completely distinct voice and opening line (zero repetition!). "
+            "Every line must be punchy (<= 132 characters), start with the character's prefix (or match their role), "
+            "accurately weave in the course topics, and invite the player to ask questions.\n"
+            "Output ONLY a strict JSON object with keys:\n"
+            "- `quest_title`: short adventurous RPG quest name\n"
+            "- `story_intro`: list of 3 short strings introducing the course crisis\n"
+            "- `npc_greetings`: object with ALL 14 DISTINCT keys:\n"
+            "  * `prof_ada` (ADA: coffee-addicted brilliant professor welcoming you to the lab)\n"
+            "  * `mom` (MOM: overprotective player's mom fussing about sweaters/food while you study)\n"
+            "  * `rival_mom` (MRS. VANCE: Rex's gossipy mom spilling embarrassing habits about Rex overstudying)\n"
+            "  * `tr_rex` (REX: cocky sarcastic rival in the lab bragging he already mastered the course)\n"
+            "  * `hv1` (BRAM: dramatic paranoid old-timer outside town warning about wild bugs in tall grass)\n"
+            "  * `hv2` (LUNA: hyper-enthusiastic nerd gushing about the rules/patterns of the course)\n"
+            "  * `tr_cal` (CAL: energetic outdoor trail scout ready for field experiments)\n"
+            "  * `tr_mira` (MIRA: deadpan sarcastic strategist sipping lemonade and roasting sloppy thinkers)\n"
+            "  * `sv1` (GARR: battle-scarred veteran outside the Gym whispering dramatic warnings about Mason)\n"
+            "  * `sv2` (PIPA: upbeat Stonegate fan praising the Center machine and joking about cramming)\n"
+            "  * `nurse` (NURSE: sassy healing-center nurse fixing both HP and fried student brains)\n"
+            "  * `clerk` (CLERK: fast-talking Poke Mart salesman pitching potions + course intel deals)\n"
+            "  * `tr_rocco` (ROCCO: gruff practical gym trainer who respects gritty effort)\n"
+            "  * `tr_mason` (MASON: stoic Granite Gym Boss demanding rock-solid mastery)"
         )
         user_msg = json.dumps(
             {
@@ -720,7 +767,7 @@ class PersonaStylizerLLM:
                 "language": lang,
                 "course_title": course_title[:60],
                 "concepts": concept_list,
-                "tone": "funny, clever, sarcastic-yet-encouraging retro Pokemon/GBA RPG adventure",
+                "tone": "14 completely unique, funny, memorable retro Pokemon/GBA RPG character introductions",
             },
             ensure_ascii=False,
         )
@@ -739,7 +786,7 @@ class PersonaStylizerLLM:
                 with torch.no_grad():
                     out_ids = self.model.generate(
                         **inputs,
-                        max_new_tokens=680,
+                        max_new_tokens=920,
                         do_sample=True,
                         temperature=0.78,
                         top_p=0.92,
@@ -833,11 +880,37 @@ class PersonaStylizerLLM:
             or re.search(r"\b(speak in english|speak english|en anglais|en français)\b", low_q)
         )
         topic_short = str(matched_concept or course_title or "this course")[:34]
+        casual_map_fr = {
+            "tr_rex": f"REX : Salut le dormeur ! T'as enfin fini ton café ? Pose une question sur '{course_title[:24]}' et voyons ton niveau !",
+            "rival_mom": f"MME VANCE : Oh bonjour ! REX fait déjà ses fiches sur '{course_title[:22]}' depuis 5h... Tu veux un potin ou un indice ?",
+            "mom": f"MAMAN : Coucou mon cœur ! T'as mangé avant de plonger dans '{course_title[:22]}' ? Pose-moi tes questions !",
+            "prof_ada": f"ADA : Bonjour chercheur ! Pose-moi n'importe quoi sur '{course_title[:24]}' pendant que mon labo chauffe !",
+            "hv1": f"BRAM : Psst ! Ne reste pas planté là—demande-moi plutôt comment survivre à '{course_title[:22]}' dans les hautes herbes !",
+            "hv2": f"LUNA : Coucou !! T'es aussi fan que moi de la logique derrière '{course_title[:22]}' ? Demande-moi n'importe quelle règle !",
+            "sv1": f"GARR : Hé, gamin... Avant d'entrer voir MASON, demande-moi quels pièges de '{course_title[:22]}' m'ont coûté cher !",
+            "sv2": f"PIPA : Coucou ! Tu prends une pause révision sur '{course_title[:22]}' ? Balance ta question !",
+        }
+        casual_map_en = {
+            "tr_rex": f"REX: Hey sleepyhead! Done yawning yet? Ask me about '{course_title[:24]}' and watch how fast I solve it.",
+            "rival_mom": f"MRS. VANCE: Why hello! REX has been muttering about '{course_title[:22]}' all morning—want gossip or study help?",
+            "mom": f"MOM: Sweetheart! Did you eat before tackling '{course_title[:24]}'? Ask me anything you need!",
+            "prof_ada": f"ADA: Welcome, researcher! Ask me anything about '{course_title[:24]}' while the lab diagnostics hum!",
+            "hv1": f"BRAM: Psst! Don't stand out here clueless—ask me how to survive '{course_title[:22]}' before hitting the tall grass!",
+            "hv2": f"LUNA: Hii!! Ready to nerd out over the rules in '{course_title[:22]}'? Ask me how anything connects!",
+            "sv1": f"GARR: Keep your voice down, kid... Ask me what '{course_title[:22]}' traps almost flattened me at Stonegate Gym!",
+            "sv2": f"PIPA: Hey! Taking a breather before cramming '{course_title[:22]}'? Fire away with a question!",
+        }
         if is_casual:
             if lang == "French":
-                fb_reply = f"{speaker} : Hé ! Ça roule ! Pose-moi une question sur '{course_title[:28]}' et je t'aide à plier les dresseurs !"
+                fb_reply = casual_map_fr.get(
+                    pk,
+                    f"{speaker} : Hé ! Ça roule ! Pose-moi une question sur '{course_title[:28]}' et je t'aide à plier les dresseurs !",
+                )
             else:
-                fb_reply = f"{speaker}: Hey there! Ask me anything about '{course_title[:28]}'—concepts, traps, or your weakest spot!"
+                fb_reply = casual_map_en.get(
+                    pk,
+                    f"{speaker}: Hey there! Ask me anything about '{course_title[:28]}'—concepts, traps, or your weakest spot!",
+                )
         else:
             if lang == "French":
                 fb_reply = f"{speaker} : Sur {topic_short}, retiens surtout ceci : {verified_fact} (et à {m_pct}%, tu gères !)"

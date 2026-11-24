@@ -16,6 +16,7 @@ technical diagrams (100% privacy-preserving, zero webcam).
 import json
 import math
 import os
+import re
 import time
 import torch
 from PIL import Image
@@ -73,6 +74,31 @@ def center_distance_norm(x: float, y: float, box) -> float:
     dx = (x - cx) / rx
     dy = (y - cy) / ry
     return min(1.0, math.sqrt(dx * dx + dy * dy) / math.sqrt(2.0))
+
+
+def sanitize_dino_labels(prompt: str) -> list:
+    """
+    Normalizes an arbitrary prompt into a non-empty list of clean, dot-free
+    candidate labels safe for both `MMGroundingDinoProcessor` (`LLMDet-Large`,
+    which rejects nested `list[list[str]]` labels containing `.`) and classic
+    `GroundingDinoProcessor` (`". ".join(labels) + "."`).
+    """
+    raw = str(prompt or "").strip()
+    if not raw:
+        return ["diagram component"]
+    # Collapse ellipses (`..`, `...`) before splitting multi-phrase prompts
+    raw = re.sub(r"\.{2,}", " ", raw)
+    chunks = re.split(r"(?:\.\s+|\r?\n)+", raw)
+    labels = []
+    seen = set()
+    for chunk in chunks:
+        # Remove any remaining internal periods (e.g. `db.article.drop()`)
+        cleaned = re.sub(r"\.+", " ", chunk)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
+        if cleaned and any(ch.isalnum() for ch in cleaned) and cleaned not in seen:
+            seen.add(cleaned)
+            labels.append(cleaned)
+    return labels or ["diagram component"]
 
 
 class GroundingDINODiagramEvaluator:
@@ -183,15 +209,21 @@ class GroundingDINODiagramEvaluator:
             target_sizes = [(img.height, img.width)]
 
         t0 = time.perf_counter()
+        labels = sanitize_dino_labels(prompt)
         if self._is_llmdet:
-            clean_label = (prompt or "diagram component").strip().rstrip(".").strip()
-            if not clean_label:
-                clean_label = "diagram component"
-            inputs = self.processor(
-                images=img,
-                text=[[clean_label]],
-                return_tensors="pt",
-            ).to(self.device)
+            try:
+                inputs = self.processor(
+                    images=img,
+                    text=[labels],
+                    return_tensors="pt",
+                ).to(self.device)
+            except ValueError:
+                plain_text = ". ".join(labels) + "."
+                inputs = self.processor(
+                    images=img,
+                    text=plain_text,
+                    return_tensors="pt",
+                ).to(self.device)
             with torch.no_grad():
                 outputs = self.model(**inputs)
             results = self.processor.post_process_grounded_object_detection(
@@ -200,9 +232,7 @@ class GroundingDINODiagramEvaluator:
                 target_sizes=target_sizes,
             )[0]
         else:
-            clean_prompt = (prompt or "diagram component.").strip()
-            if not clean_prompt.endswith("."):
-                clean_prompt = clean_prompt + "."
+            clean_prompt = ". ".join(labels) + "."
             inputs = self.processor(
                 images=img,
                 text=clean_prompt,
@@ -241,12 +271,16 @@ class GroundingDINODiagramEvaluator:
         if not prompt.strip().endswith("."):
             prompt = prompt.strip() + "."
 
-        raw_boxes, raw_scores, latency_ms = self.detect_boxes(
-            img=img,
-            prompt=prompt,
-            threshold=0.20 if self._is_llmdet else 0.12,
-            target_sizes=[(img.height, img.width)],
-        )
+        try:
+            raw_boxes, raw_scores, latency_ms = self.detect_boxes(
+                img=img,
+                prompt=prompt,
+                threshold=0.20 if self._is_llmdet else 0.12,
+                target_sizes=[(img.height, img.width)],
+            )
+        except Exception as exc:
+            print(f"[DINO] Warning: detect_boxes failed for '{puzzle_id}' ({prompt!r}): {exc}", flush=True)
+            raw_boxes, raw_scores, latency_ms = [], [], 0.0
 
         target_box = [float(v) for v in p["target_box"]]
 

@@ -524,29 +524,35 @@ const AITutor = (() => {
   }
 
   async function submitVisionVQA(conceptId, studentAnswer, responseSec = 10.0) {
-    try {
-      const data = await apiFetch('/api/vision/vqa', {
-        method: 'POST',
-        body: JSON.stringify({
-          concept_id: Number(conceptId || 0),
-          student_answer: String(studentAnswer || ''),
-          response_sec: Number(responseSec || 10.0),
-        }),
-      }, 15000);
-      online = true;
-      statusCache = data.status;
-      persistToPlayer(data.status);
-      return data.result;
-    } catch (e) {
-      return {
-        concept_id: Number(conceptId || 0),
-        verdict: studentAnswer && studentAnswer.trim().length > 18 ? 'correct' : 'partial',
-        score: studentAnswer && studentAnswer.trim().length > 18 ? 0.88 : 0.48,
-        grader_latency_ms: 1.0,
-        mastery_before: localMastery.slice(),
-        mastery_after: localMastery.slice(),
-      };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const data = await apiFetch('/api/vision/vqa', {
+          method: 'POST',
+          body: JSON.stringify({
+            concept_id: Number(conceptId || 0),
+            student_answer: String(studentAnswer || ''),
+            response_sec: Number(responseSec || 10.0),
+          }),
+        }, 15000);
+        online = true;
+        statusCache = data.status;
+        persistToPlayer(data.status);
+        return data.result;
+      } catch (e) {
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, 600));
+          continue;
+        }
+      }
     }
+    return {
+      concept_id: Number(conceptId || 0),
+      verdict: studentAnswer && studentAnswer.trim().length > 18 ? 'correct' : 'partial',
+      score: studentAnswer && studentAnswer.trim().length > 18 ? 0.88 : 0.48,
+      grader_latency_ms: 1.0,
+      mastery_before: localMastery.slice(),
+      mastery_after: localMastery.slice(),
+    };
   }
 
   function resolveBattleFocus(ctx = {}) {
@@ -909,30 +915,45 @@ const AITutor = (() => {
   }
 
   async function submitVisionPuzzle(puzzleId, clickX, clickY, userBox = null, responseSec = 6.0) {
-    if (online) {
-      try {
-        const data = await apiFetch('/api/vision/evaluate', {
-          method: 'POST',
-          body: JSON.stringify({
-            puzzle_id: puzzleId,
-            click_x: clickX,
-            click_y: clickY,
-            user_box: userBox,
-            response_sec: responseSec,
-          }),
-        }, 10000);
-        statusCache = data.status;
-        persistToPlayer(data.status);
-        return data.result;
-      } catch (e) {
-        online = false;
+    // Always attempt live server evaluation when hosted over HTTP/HTTPS or previously online,
+    // retrying once on transient Cloudflare tunnel drops so a single blip never kicks us offline.
+    const shouldTryLive = online || DEFAULT_API === '';
+    if (shouldTryLive) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const data = await apiFetch('/api/vision/evaluate', {
+            method: 'POST',
+            body: JSON.stringify({
+              puzzle_id: puzzleId,
+              click_x: clickX,
+              click_y: clickY,
+              user_box: userBox,
+              response_sec: responseSec,
+            }),
+          }, 15000);
+          online = true;
+          statusCache = data.status;
+          persistToPlayer(data.status);
+          return data.result;
+        } catch (e) {
+          if (attempt === 0) {
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          }
+          online = false;
+        }
       }
     }
-    // Offline fallback evaluation
-    const p = FALLBACK_VISION_PUZZLES.find(x => x.puzzle_id === puzzleId) || FALLBACK_VISION_PUZZLES[0];
-    const tb = p.target_box;
-    const cid = p.concept_id;
-    const before = localMastery.slice();
+    // Cached fallback evaluation: ALWAYS prefer the uploaded course's `visionPuzzlesCache`
+    // (real Qwen3-VL-8B + LLMDet-Large boxes) over the hardcoded default YOLO/OCR puzzles!
+    const hasUploadedCache = Array.isArray(visionPuzzlesCache) && visionPuzzlesCache.length > 0;
+    const pool = hasUploadedCache ? visionPuzzlesCache : FALLBACK_VISION_PUZZLES;
+    const p = pool.find(x => x.puzzle_id === puzzleId) || pool[0];
+    const tb = p.target_box || [100, 100, 300, 300];
+    const cid = Number(p.concept_id || 0);
+    const before = (statusCache && Array.isArray(statusCache.mastery))
+      ? statusCache.mastery.slice()
+      : localMastery.slice();
     let verdict = 'incorrect';
     let iou = 0;
     let semScore = 0.08;
@@ -952,12 +973,18 @@ const AITutor = (() => {
     } else if (cx >= tb[0] - 22 && cx <= tb[2] + 22 && cy >= tb[1] - 22 && cy <= tb[3] + 22) {
       verdict = 'partial'; semScore = 0.54; iou = 0.30;
     }
+    const after = before.slice();
     if (verdict === 'correct') {
-      localMastery[cid] = Math.min(0.96, localMastery[cid] + 0.12);
+      after[cid] = Math.min(0.96, (after[cid] || 0.4) + 0.12);
     } else if (verdict === 'partial') {
-      localMastery[cid] = Math.min(0.88, localMastery[cid] + 0.05);
+      after[cid] = Math.min(0.88, (after[cid] || 0.4) + 0.05);
     }
-    statusCache = buildOfflineStatus();
+    localMastery = after.slice();
+    if (!statusCache) {
+      statusCache = buildOfflineStatus();
+    } else {
+      statusCache.mastery = after.slice();
+    }
     persistToPlayer(statusCache);
     return {
       puzzle_id: p.puzzle_id,
@@ -974,12 +1001,16 @@ const AITutor = (() => {
       dino_confidence: 0.48,
       dino_latency_ms: 0.5,
       mastery_before: before,
-      mastery_after: localMastery.slice(),
+      mastery_after: after,
       xp_gained: verdict === 'correct' ? 45 : (verdict === 'partial' ? 20 : 0),
       feedback: verdict === 'correct'
-        ? `CALIBRATION LOCKED! Grounding DINO verified [${p.target_label}]. ${p.explanation}`
-        : `MISALIGNED! Target [${p.target_label}] is highlighted in green. ${p.explanation}`,
-      graded_by: 'Grounding-DINO-Tiny (Offline Fallback)',
+        ? `CALIBRATION LOCKED! Verified your selection on [${p.target_label}]. ${p.explanation}`
+        : (verdict === 'partial'
+          ? `GLANCING ALIGNMENT! Partially bordered [${p.target_label}]. ${p.explanation}`
+          : `MISALIGNED! Target [${p.target_label}] is highlighted in green. ${p.explanation}`),
+      graded_by: hasUploadedCache
+        ? 'Cached VLM + DINO Box (Reconnecting...)'
+        : 'Grounding-DINO-Tiny (Offline Fallback)',
     };
   }
 

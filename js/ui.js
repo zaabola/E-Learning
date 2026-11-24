@@ -1533,7 +1533,7 @@ const UI = (() => {
           ctx.restore();
         }
 
-        // Draw Grounding DINO evaluation result overlay
+        // Draw Grounding DINO / VLM evaluation result overlay
         if (evalResult) {
           const gb = evalResult.grounded_box || p.target_box;
           if (gb && gb.length === 4) {
@@ -1543,15 +1543,15 @@ const UI = (() => {
             ctx.strokeStyle = '#38f890';
             ctx.lineWidth = 4;
             ctx.strokeRect(gb[0], gb[1], gb[2] - gb[0], gb[3] - gb[1]);
-            ctx.fillStyle = '#0e1e18';
-            ctx.fillRect(gb[0], Math.max(2, gb[1] - 24), 255, 22);
-            ctx.fillStyle = '#58ffaa';
+            const tagText = `VLM+DINO: ${(evalResult.target_label || '').slice(0, 24)} (${Math.round((evalResult.dino_confidence || 0.48) * 100)}%)`;
             ctx.font = 'bold 12px monospace';
-            ctx.fillText(
-              `Grounding DINO: ${evalResult.target_label.slice(0, 22)} (${Math.round((evalResult.dino_confidence || 0.48) * 100)}%)`,
-              gb[0] + 6,
-              Math.max(17, gb[1] - 8)
-            );
+            const tagW = Math.min(W - 8, Math.max(180, ctx.measureText(tagText).width + 14));
+            const tagX = Math.max(2, Math.min(W - tagW - 2, gb[0]));
+            const tagY = gb[1] >= 26 ? gb[1] - 24 : Math.min(H - 24, gb[3] + 4);
+            ctx.fillStyle = 'rgba(14, 30, 24, 0.92)';
+            ctx.fillRect(tagX, tagY, tagW, 20);
+            ctx.fillStyle = '#58ffaa';
+            ctx.fillText(tagText, tagX + 6, tagY + 14);
             ctx.restore();
           }
 
@@ -1622,7 +1622,7 @@ const UI = (() => {
         const live = typeof AITutor !== 'undefined' && AITutor.isOnline();
         const pills = puzzles.map((item, idx) => {
           const tag = `C${item.concept_id}-${idx % 2 === 0 ? 'A' : 'B'}`;
-          return `<button type="button" class="ai-btn-mini" data-pidx="${idx}" style="${idx === pIdx ? 'border-color:#58f898;color:#58f898' : ''}">${tag}</button>`;
+          return `<button type="button" class="ai-btn-mini" data-pidx="${idx}" style="padding:3px 7px;${idx === pIdx ? 'border-color:#58f898;color:#58f898' : ''}">${tag}</button>`;
         }).join('');
 
         let statusFooter = '';
@@ -1632,19 +1632,19 @@ const UI = (() => {
           const mAfter = Math.round(((evalResult.mastery_after && evalResult.mastery_after[cid]) || 0.5) * 1000) / 10;
           const vCol = evalResult.verdict === 'correct' ? '#58f898' : (evalResult.verdict === 'partial' ? '#f8d048' : '#ff8080');
           statusFooter = `
-            <div style="background:#0d1624;border:1px solid ${vCol};border-radius:6px;padding:7px 10px;margin-top:6px">
-              <div style="font-size:8.5px;color:${vCol};margin-bottom:3px">
-                ${escHtml(evalResult.graded_by)} &middot; IoU: ${evalResult.iou} &middot; DKT C${cid} Mastery: ${mBefore}% &rarr; <strong>${mAfter}%</strong> (+${evalResult.xp_gained || 0} EXP)
+            <div style="flex-shrink:0;max-height:64px;overflow-y:auto;background:#0d1624;border:1px solid ${vCol};border-radius:5px;padding:4px 8px;margin-top:4px">
+              <div style="font-size:7.5px;color:${vCol};margin-bottom:2px">
+                ${escHtml(evalResult.graded_by)} &middot; IoU: ${evalResult.iou} &middot; DKT C${cid}: ${mBefore}% &rarr; <strong>${mAfter}%</strong> (+${evalResult.xp_gained || 0} EXP)
               </div>
-              <div style="font-family:var(--dialog-font);font-size:15.5px;color:#dce8f6;line-height:1.25">
+              <div style="font-family:var(--dialog-font);font-size:14px;color:#dce8f6;line-height:1.18">
                 ${escHtml(evalResult.feedback)}
               </div>
             </div>
           `;
         } else {
           statusFooter = `
-            <div style="font-family:var(--dialog-font);font-size:16px;color:#9cc4e8;margin-top:6px">
-              &#128070; <strong>Click directly on the target component</strong> OR <strong>click-and-drag a bounding box</strong> around it on the schematic above! (100% Privacy-First Vision AI &mdash; Zero Webcam)
+            <div style="flex-shrink:0;font-family:var(--dialog-font);font-size:14.5px;color:#9cc4e8;margin-top:4px;line-height:1.15">
+              &#128070; <strong>Click</strong> OR <strong>click-and-drag a box</strong> around the target component on the figure above! (100% Privacy-First Vision AI)
             </div>
           `;
         }
@@ -1653,42 +1653,40 @@ const UI = (() => {
         const vqaRef = p.vlm_vqa_reference || p.explanation || '';
         const stInfo = (typeof AITutor !== 'undefined' && AITutor.getStatus) ? AITutor.getStatus() : {};
         const modInfo = stInfo.models || {};
-        const vlmShort = (modInfo.vlm && modInfo.vlm.short_name) || (p.vlm_model && p.vlm_model.includes('Qwen3') ? 'Qwen3-VL-8B' : 'Qwen3-VL-8B');
-        const dinoShort = (modInfo.dino && modInfo.dino.name) || 'LLMDet-Large';
+        const vlmShort = (modInfo.vlm && modInfo.vlm.short_name) || 'Qwen3-VL-8B';
+        const dinoShort = ((modInfo.dino && modInfo.dino.name) || 'LLMDet-Large').replace(/\s*\(Offline Fallback\)/i, '');
 
         scr.innerHTML = `
-          <div class="kq-journal-win" style="padding:10px 14px">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px">
-              <div>
-                <div class="quest-title-badge" style="color:#58f898">PROF. ADA'S LAB MONITOR &mdash; ${escHtml(vlmShort)} + ${escHtml(dinoShort.toUpperCase())}</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:6px">
+          <div class="kq-journal-win" style="padding:8px 12px;overflow:hidden">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;margin-bottom:4px">
+              <div class="quest-title-badge" style="color:#58f898;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">LAB MONITOR &mdash; ${escHtml(vlmShort)} + ${escHtml(dinoShort.toUpperCase())}</div>
+              <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
                 <span class="ai-dot ${live ? '' : 'offline'}"></span>
-                <span style="font-size:7.5px;color:${live ? '#78f098' : '#f8b848'}">${live ? 'QWEN-VL + DINO + DeBERTa (CUDA)' : 'OFFLINE CACHE'}</span>
-                <button type="button" class="ai-btn-mini" id="dino-new-course-btn" style="border-color:#58f898;color:#58f898">+ NEW COURSE</button>
-                <button type="button" class="ai-btn-mini" id="dino-next-btn">NEXT PUZZLE &rarr;</button>
-                <button type="button" class="ai-btn-mini" id="dino-close-btn">&#10005; EXIT</button>
+                <span style="font-size:7px;color:${live ? '#78f098' : '#f8b848'};white-space:nowrap">${live ? 'CUDA LIVE' : 'CACHED'}</span>
+                <button type="button" class="ai-btn-mini" id="dino-new-course-btn" style="padding:4px 7px;border-color:#58f898;color:#58f898">+ COURSE</button>
+                <button type="button" class="ai-btn-mini" id="dino-next-btn" style="padding:4px 7px">NEXT &rarr;</button>
+                <button type="button" class="ai-btn-mini" id="dino-close-btn" style="padding:4px 7px">&#10005;</button>
               </div>
             </div>
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px">${pills}</div>
-            <div style="background:#142238;border:1px solid #3c6ea8;border-radius:5px;padding:5px 10px;margin-bottom:5px;font-family:var(--dialog-font);font-size:16px;color:#f8e078">
+            <div style="display:flex;gap:4px;flex-wrap:nowrap;overflow-x:auto;flex-shrink:0;margin-bottom:4px">${pills}</div>
+            <div style="flex-shrink:0;background:#142238;border:1px solid #3c6ea8;border-radius:5px;padding:4px 8px;margin-bottom:4px;font-family:var(--dialog-font);font-size:14.5px;line-height:1.18;color:#f8e078">
               ${escHtml(p.prompt)}
             </div>
-            <div style="position:relative;display:flex;justify-content:center;background:#0a101a;border:2px solid #2e4668;border-radius:6px;overflow:hidden">
-              <canvas id="dino-diagram-canvas" width="720" height="420" style="width:auto;height:215px;aspect-ratio:720/420;max-width:100%;display:block;cursor:crosshair;touch-action:none"></canvas>
+            <div style="flex:1 1 0;min-height:140px;position:relative;display:flex;align-items:center;justify-content:center;background:#0a101a;border:2px solid #2e4668;border-radius:6px;overflow:hidden;padding:2px">
+              <canvas id="dino-diagram-canvas" width="720" height="420" style="height:100%;width:auto;max-width:100%;max-height:100%;aspect-ratio:720/420;display:block;cursor:crosshair;touch-action:none"></canvas>
             </div>
             ${statusFooter}
-            <div style="background:#101b2c;border:1px solid #3a5c88;border-radius:5px;padding:6px 9px;margin-top:6px">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px">
-                <span style="font-size:8px;color:#68c8ff">VLM VISUAL QUESTION (${escHtml(vlmShort)} &rarr; DeBERTa-v3 Grader):</span>
-                <button type="button" class="ai-btn-mini" id="dino-vqa-fill">Auto-Fill Answer</button>
+            <div style="flex-shrink:0;background:#101b2c;border:1px solid #3a5c88;border-radius:5px;padding:5px 8px;margin-top:4px">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:3px">
+                <span style="font-size:7.5px;color:#68c8ff">VLM VISUAL QUESTION (${escHtml(vlmShort)} &rarr; DeBERTa-v3 Grader):</span>
+                <button type="button" class="ai-btn-mini" id="dino-vqa-fill" style="padding:3px 7px">Auto-Fill</button>
               </div>
-              <div style="font-family:var(--dialog-font);font-size:15px;color:#e4eef8;margin-bottom:4px">${escHtml(vqaQ)}</div>
+              <div style="font-family:var(--dialog-font);font-size:14px;line-height:1.15;color:#e4eef8;margin-bottom:3px">${escHtml(vqaQ)}</div>
               <div style="display:flex;gap:6px">
-                <input type="text" id="dino-vqa-input" placeholder="Type 1-sentence answer about this diagram..." style="flex:1;background:#09111c;color:#fff;border:1px solid #35567e;border-radius:4px;padding:4px 8px;font-family:var(--dialog-font);font-size:15px" />
-                <button type="button" class="ai-btn-primary" id="dino-vqa-submit" style="width:auto;padding:4px 10px">GRADE VQA</button>
+                <input type="text" id="dino-vqa-input" placeholder="Type 1-sentence answer about this diagram..." style="flex:1;background:#09111c;color:#fff;border:1px solid #35567e;border-radius:4px;padding:3px 7px;font-family:var(--dialog-font);font-size:14px" />
+                <button type="button" class="ai-btn-primary" id="dino-vqa-submit" style="width:auto;padding:3px 9px;font-size:8px">GRADE VQA</button>
               </div>
-              <div id="dino-vqa-out" style="font-family:var(--dialog-font);font-size:14.5px;color:#88e8a8;margin-top:3px"></div>
+              <div id="dino-vqa-out" style="font-family:var(--dialog-font);font-size:13.5px;color:#88e8a8;margin-top:2px"></div>
             </div>
           </div>
         `;

@@ -81,29 +81,42 @@ def _start_cloudflare_tunnel(port: int = 8000):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run full RPG + Live Qwen3-VL-8B + LLMDet-Large on Kaggle GPUs")
+    parser = argparse.ArgumentParser(description="Run full 7-Model AI + RPG Server on Kaggle 2x T4 GPUs")
     parser.add_argument("--port", type=int, default=8000, help="HTTP port (default: 8000)")
     parser.add_argument("--model", default="Qwen/Qwen3-VL-8B-Instruct", help="Hugging Face VLM ID (fallback: Qwen/Qwen2.5-VL-7B-Instruct)")
+    parser.add_argument("--reasoner-model", default="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", help="Model #6 Pedagogical Reasoner LLM")
+    parser.add_argument("--stylizer-model", default="NousResearch/Meta-Llama-3.1-8B-Instruct", help="Model #7 Persona Stylizer LLM (+ auto QLoRA)")
     parser.add_argument("--no-live-vlm", action="store_true", help="Skip loading live VLM weights")
+    parser.add_argument("--no-live-llm", action="store_true", help="Skip loading live Stage 4 Reasoner + Stylizer LLMs")
     args = parser.parse_args()
 
     print("=" * 88)
-    print("  BOOTING 5-MODEL AI + RPG SERVER ON KAGGLE GPUs")
+    print("  BOOTING 7-MODEL AI + RPG SERVER ON KAGGLE GPUs")
     print("=" * 88)
     state = GameServerState(
         default_course="vision_yolo_ocr",
         default_profile="average",
         vlm_mode="hybrid" if args.no_live_vlm else "live",
         vlm_model_id=args.model,
+        llm_mode="fallback" if args.no_live_llm else "live",
+        reasoner_model_id=args.reasoner_model,
+        stylizer_model_id=args.stylizer_model,
     )
     KnowledgeQuestHTTPHandler.server_state = state
 
     eng = state.engine
-    print(f"  [Model #1] {eng.dkt_info['name']:<24} | AUC={eng.dkt_info['auc']:.4f}")
-    print(f"  [Model #2] {eng.rl_info['name']:<24} | Reward={eng.rl_info['reward']:.2f}")
-    print(f"  [Model #3] {eng.grader_info['name']:<24} | Device={eng.grader_info['device']}")
-    print(f"  [Model #4] {eng.dino_info['name']:<24} | Device={eng.dino_info['device']}")
-    print(f"  [Model #5] {eng.vlm_info['name']:<24} | Mode={eng.vlm_info['mode'].upper()}")
+    llm_r = eng.llm_info["reasoner"]
+    llm_s = eng.llm_info["stylizer"]
+    print(f"  [Model #1] {eng.dkt_info['name']:<26} | AUC={eng.dkt_info['auc']:.4f}")
+    print(f"  [Model #2] {eng.rl_info['name']:<26} | Reward={eng.rl_info['reward']:.2f}")
+    print(f"  [Model #3] {eng.grader_info['name']:<26} | Device={eng.grader_info['device']}")
+    print(f"  [Model #4] {eng.dino_info['name']:<26} | Device={eng.dino_info['device']}")
+    print(f"  [Model #5] {eng.vlm_info['name']:<26} | Mode={eng.vlm_info['mode'].upper()}")
+    print(f"  [Model #6] {llm_r['name']:<26} | Live={llm_r['live']} ({llm_r['model_id']})")
+    print(f"  [Model #7] {llm_s['name']:<26} | Live={llm_s['live']} | QLoRA={llm_s['qlora_active']}")
+    print("-" * 88)
+    print("  Tip: Train custom RPG QLoRA adapter -> !python -u Models/LLM/scripts/train_persona_qlora.py")
+    print("  Tip: Run Stage 4 LLM benchmark      -> !python -u Models/LLM/scripts/evaluate_stage4_llms.py")
     print("-" * 88)
 
     httpd = ThreadingHTTPServer(("0.0.0.0", args.port), KnowledgeQuestHTTPHandler)

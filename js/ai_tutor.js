@@ -636,14 +636,18 @@ const AITutor = (() => {
 
   async function nextEncounter(battleCtx = {}) {
     const { focusConceptId, forceAction } = resolveBattleFocus(battleCtx);
+    const personaKey = (battleCtx && battleCtx.trainer && battleCtx.trainer.flag)
+      ? battleCtx.trainer.flag
+      : 'wild';
     try {
       const data = await apiFetch('/api/encounter/next', {
         method: 'POST',
         body: JSON.stringify({
           focus_concept_id: focusConceptId,
           force_action: forceAction,
+          persona_key: personaKey,
         }),
-      }, 3000);
+      }, 28000);
       online = true;
       statusCache = data.status;
       return data.encounter;
@@ -651,6 +655,20 @@ const AITutor = (() => {
       online = false;
       statusCache = buildOfflineStatus();
       return buildOfflineEncounter(focusConceptId, forceAction);
+    }
+  }
+
+  async function getNpcDialogue(npcKey = 'prof_ada', starterName = 'your partner') {
+    if (!online) return null;
+    try {
+      const q = `/api/npc/dialogue?npc=${encodeURIComponent(npcKey)}&starter=${encodeURIComponent(starterName)}`;
+      const data = await apiFetch(q, { method: 'GET' }, 16000);
+      if (data && Array.isArray(data.lines) && data.lines.length > 0) {
+        return data;
+      }
+      return null;
+    } catch (e) {
+      return null;
     }
   }
 
@@ -1093,6 +1111,7 @@ const AITutor = (() => {
     ingestCustomCourse,
     nextEncounter,
     submitEncounter,
+    getNpcDialogue,
     getVisionPuzzles,
     submitVisionPuzzle,
     submitVisionVQA,

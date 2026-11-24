@@ -49,9 +49,18 @@ class GameServerState:
         default_profile: str = 'average',
         vlm_mode: str = 'hybrid',
         vlm_model_id: str = 'Qwen/Qwen3-VL-8B-Instruct',
+        llm_mode: str = 'fallback',
+        reasoner_model_id: str = 'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B',
+        stylizer_model_id: str = 'NousResearch/Meta-Llama-3.1-8B-Instruct',
     ):
         self.lock = threading.Lock()
-        self.engine = KnowledgeQuestAIEngine(vlm_mode=vlm_mode, vlm_model_id=vlm_model_id)
+        self.engine = KnowledgeQuestAIEngine(
+            vlm_mode=vlm_mode,
+            vlm_model_id=vlm_model_id,
+            llm_mode=llm_mode,
+            reasoner_model_id=reasoner_model_id,
+            stylizer_model_id=stylizer_model_id,
+        )
         self.session = self.engine.create_session(profile=default_profile, course_id=default_course)
         self.ingest_jobs = {}
 
@@ -119,6 +128,20 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
                 puzzles = st.session.get_diagram_puzzles()
             self._send_json({'puzzles': puzzles})
             return
+        if route == '/api/npc/dialogue':
+            st = self.server_state
+            qs = parse_qs(parsed.query)
+            npc_key = (qs.get('npc') or ['prof_ada'])[0]
+            starter_name = (qs.get('starter') or ['your partner'])[0]
+            with st.lock:
+                dlg = st.session.get_npc_dialogue(npc_key=npc_key, starter_name=starter_name)
+            print(
+                f"  [NPC DIALOGUE] {npc_key} | {dlg.get('model_name', 'Stylizer')} "
+                f"| src={dlg.get('source')} | cache={dlg.get('cache_hit')}",
+                flush=True,
+            )
+            self._send_json(dlg)
+            return
         if route == '/api/course/ingest/status':
             st = self.server_state
             qs = parse_qs(parsed.query)
@@ -166,6 +189,7 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
         if route == '/api/encounter/next':
             focus_c = body.get('focus_concept_id', None)
             force_act = body.get('force_action', None)
+            persona_key = str(body.get('persona_key') or 'wild')
             if focus_c is not None:
                 focus_c = max(0, min(4, int(focus_c)))
             if force_act is not None:
@@ -174,12 +198,16 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
                 enc = st.session.plan_next_encounter(
                     focus_concept_id=focus_c,
                     force_action=force_act,
+                    persona_key=persona_key,
                 )
                 snap = st.session.get_status_snapshot()
+            lm = enc.get('llm_meta') or {}
+            llm_tag = f" | LLM={lm.get('reasoner_model','Bank')}+{lm.get('stylizer_model','Tmpl')} (hit={lm.get('cache_hit')})"
             print(
                 f"  [RL TURN #{enc['turn']:02d}] Double-DQN -> [{enc['rl_action']}] {enc['rl_action_name']} "
                 f"| Target: C{enc['target_concept_id']} ({enc['target_concept_short']}) "
-                f"| {enc['rl_latency_ms']:.2f}ms"
+                f"| Persona={persona_key} | {enc['rl_latency_ms']:.2f}ms{llm_tag}",
+                flush=True,
             )
             self._send_json({'encounter': enc, 'status': snap})
             return
@@ -340,27 +368,37 @@ def main():
     parser.add_argument('--profile', default='average', choices=['struggling', 'average', 'advanced'])
     parser.add_argument('--live-vlm', action='store_true', help='Load live 8B/7B VLM on GPU (for Kaggle 2x T4)')
     parser.add_argument('--vlm-model', default='Qwen/Qwen3-VL-8B-Instruct', help='Hugging Face VLM model ID')
+    parser.add_argument('--live-llm', action='store_true', help='Load live Stage 4 Reasoner (7B) + Stylizer (8B) LLMs on GPU')
+    parser.add_argument('--reasoner-model', default='deepseek-ai/DeepSeek-R1-Distill-Qwen-7B', help='Model #6 Pedagogical Reasoner ID')
+    parser.add_argument('--stylizer-model', default='NousResearch/Meta-Llama-3.1-8B-Instruct', help='Model #7 Persona Stylizer ID')
     parser.add_argument('--open', action='store_true', help='Open browser automatically')
     args = parser.parse_args()
 
     print("=" * 88)
-    print("  KNOWLEDGEQUEST 5-MODEL AI + BROWSER RPG SERVER")
+    print("  KNOWLEDGEQUEST 7-MODEL AI + BROWSER RPG SERVER")
     print("=" * 88)
-    print("  Loading Final-DKT-GRU + Double-DQN + DeBERTa-v3 + Grounding-DINO + Qwen-VL...")
+    print("  Loading Final-DKT-GRU + Double-DQN + DeBERTa-v3 + Grounding-DINO + Qwen-VL + Stage 4 LLMs...")
     state = GameServerState(
         default_course=args.course,
         default_profile=args.profile,
         vlm_mode='live' if args.live_vlm else 'hybrid',
         vlm_model_id=args.vlm_model,
+        llm_mode='live' if args.live_llm else 'fallback',
+        reasoner_model_id=args.reasoner_model,
+        stylizer_model_id=args.stylizer_model,
     )
     KnowledgeQuestHTTPHandler.server_state = state
 
     eng = state.engine
+    llm_r = eng.llm_info['reasoner']
+    llm_s = eng.llm_info['stylizer']
     print(f"  [Model #1] {eng.dkt_info['name']:<20} | AUC={eng.dkt_info['auc']:.4f}")
     print(f"  [Model #2] {eng.rl_info['name']:<20} | Reward={eng.rl_info['reward']:.2f}")
     print(f"  [Model #3] {eng.grader_info['name']:<20} | 3-Way Acc={eng.grader_info['acc_3way']*100:.2f}% ({eng.grader_info['device']})")
     print(f"  [Model #4] {eng.dino_info['name']:<20} | Mean Box IoU={eng.dino_info['mean_box_iou']:.3f} | {eng.dino_info['puzzles']} Lab Diagrams ({eng.dino_info['device']})")
     print(f"  [Model #5] {eng.vlm_info['name']:<20} | Mode={eng.vlm_info['mode'].upper()} | {eng.vlm_info['vqa_challenges']} VQA Rubrics")
+    print(f"  [Model #6] {llm_r['name']:<20} | Live={llm_r['live']}")
+    print(f"  [Model #7] {llm_s['name']:<20} | Live={llm_s['live']} | QLoRA={llm_s['qlora_active']}")
     print(f"  Active Course : {state.session.course_title} (`{state.session.course_id}`)")
     print(f"  Boot Time     : {eng.boot_time_sec:.2f}s (100% Local, Zero Webcam)")
     print("-" * 88)

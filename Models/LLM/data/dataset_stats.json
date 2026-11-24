@@ -1,0 +1,23 @@
+{
+  "total": 419,
+  "train": 311,
+  "val": 48,
+  "test": 60,
+  "personas": [
+    "prof_ada",
+    "tr_cal",
+    "tr_mason",
+    "tr_mira",
+    "tr_rex",
+    "tr_rocco",
+    "wild"
+  ],
+  "languages": [
+    "English",
+    "French"
+  ],
+  "tasks": [
+    "battle_persona_banter",
+    "prof_ada_briefing"
+  ]
+}

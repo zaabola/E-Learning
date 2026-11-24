@@ -967,12 +967,18 @@ const UI = (() => {
           const badgeBanner = turnResult.badge_just_earned
             ? `<div class="ai-badge-unlock">&#9733; CONCEPT SYNTHESIS BADGE UNLOCKED: C${cid} ${escHtml(turnResult.target_concept_title)}! (+Bonus EXP)</div>`
             : '';
+          const reactLine = turnResult.persona_reaction
+            || (enc.persona_banter ? (v === 'correct' ? enc.persona_banter.on_correct : (v === 'partial' ? enc.persona_banter.on_partial : enc.persona_banter.on_incorrect)) : '');
+          const reactHtml = reactLine
+            ? `<div class="ai-persona-react">${escHtml(reactLine)}</div>`
+            : '';
 
           card.innerHTML = `${topHtml}
             <div class="ai-body-area ai-scroll">
               <div>
                 <div class="ai-verdict-banner ${v}">${vTitle}</div>
                 ${badgeBanner}
+                ${reactHtml}
                 <div class="ai-ref-box"><strong>Prof. Ada's Insight:</strong> ${escHtml(turnResult.reference_answer)}</div>
                 <div class="ai-telem-grid">
                   <div>GRADER: ${escHtml(turnResult.grader.graded_by)}</div>
@@ -992,10 +998,22 @@ const UI = (() => {
         }
 
         // Question Phase
+        const banter = enc.persona_banter || null;
+        const lm = enc.llm_meta || null;
+        const llmTag = (lm && (lm.reasoner_source === 'live_llm' || lm.stylizer_source === 'live_llm' || lm.stylizer_source === 'live_qlora'))
+          ? `<span class="ai-llm-chip">${escHtml(lm.reasoner_model || 'DeepSeek-R1')} + ${escHtml(lm.stylizer_model || 'Llama-3.1')}${lm.cache_hit ? ' &middot; INSTANT' : ''}</span>`
+          : '';
+        const personaHtml = (banter && banter.intro_taunt)
+          ? `<div class="ai-persona-bar">
+               <div class="ai-persona-text">${escHtml(banter.intro_taunt)}</div>
+               ${llmTag}
+             </div>`
+          : '';
         const hintStr = enc.podcast_hint || (hintRevealed ? enc.available_podcast_hint : null);
+        const hintIntroStr = (hintStr && banter && banter.hint_intro) ? `${banter.hint_intro} ` : '';
         const podcastHtml = hintStr
           ? `<div class="ai-podcast-bar">
-               <div class="ai-podcast-text">&#127911; ${escHtml(hintStr)}</div>
+               <div class="ai-podcast-text">&#127911; ${escHtml(hintIntroStr + hintStr)}</div>
                <button class="ai-btn-mini" id="ai-play-pod">&#9654; AUDIO</button>
              </div>`
           : '';
@@ -1035,6 +1053,7 @@ const UI = (() => {
           : 'UP/DOWN + Z (or keys 1-4) &middot; [T] Own Words &middot; [H] Podcast';
 
         card.innerHTML = `${topHtml}
+          ${personaHtml}
           ${podcastHtml}
           <div class="ai-question-box">${escHtml(enc.question)}</div>
           <div class="ai-body-area ai-scroll">

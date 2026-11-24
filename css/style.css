@@ -793,6 +793,46 @@ body.touch #screen {
   padding: 4px 8px;
 }
 
+.ai-persona-bar {
+  margin-top: 6px;
+  background: linear-gradient(90deg, #1b2234 0%, #241e38 100%);
+  border: 1px solid #8a64d8;
+  border-radius: 6px;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ai-persona-text {
+  font-family: var(--dialog-font);
+  font-size: 16px;
+  color: #f4d878;
+  line-height: 1.25;
+}
+.ai-llm-chip {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  color: #d6c2ff;
+  background: rgba(138, 100, 216, 0.22);
+  border: 1px solid rgba(176, 140, 248, 0.45);
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.ai-persona-react {
+  margin-top: 7px;
+  background: #231d36;
+  border-left: 3px solid #f4d878;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: var(--dialog-font);
+  font-size: 16px;
+  color: #fae396;
+  line-height: 1.25;
+}
+
 .ai-podcast-bar {
   margin-top: 7px;
   background: #1e2c3e;

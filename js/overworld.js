@@ -286,8 +286,16 @@ const Overworld = (() => {
         'ADA: Choose a companion from those three consoles: BULBASAUR, CHARMANDER, or SQUIRTLE.',
       ]);
     } else {
+      const partnerName = creatureName(Game.player.party[0]);
+      if (typeof AITutor !== 'undefined' && AITutor.isOnline() && AITutor.getNpcDialogue) {
+        const dlg = await AITutor.getNpcDialogue('prof_ada', partnerName);
+        if (dlg && Array.isArray(dlg.lines) && dlg.lines.length) {
+          await UI.sayLines(dlg.lines);
+          return;
+        }
+      }
       await UI.sayLines([
-        `ADA: How is ${creatureName(Game.player.party[0])}? Looking sharp!`,
+        `ADA: How is ${partnerName}? Looking sharp!`,
         'ADA: Head north along FERNWAY TRAIL toward STONEGATE GYM. Scout CAL tests IoU & NMS, MIRA tests YOLO, ROCCO tests OCR & CTC, and Leader MASON guards the End-to-End Vision Pipeline trial!',
         'ADA: Remember: open ENTER -> JOURNAL whenever you want to read your YOLO & OCR Summary Notes or check your DKT Mastery.',
       ]);

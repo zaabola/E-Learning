@@ -36,6 +36,7 @@ for _sub in (
     os.path.join(_MODELS_ROOT, 'AnswerEvaluator', 'scripts'),
     os.path.join(_MODELS_ROOT, 'GroundingDINO', 'scripts'),
     os.path.join(_MODELS_ROOT, 'VLM', 'scripts'),
+    os.path.join(_MODELS_ROOT, 'LLM', 'scripts'),
 ):
     if _sub not in sys.path:
         sys.path.insert(0, _sub)
@@ -46,6 +47,7 @@ from models import DuelingDoubleDQN, PPOActorCritic
 from grader_models import grade_student_answer, load_trained_grader
 from dino_evaluator import GroundingDINODiagramEvaluator
 from vlm_diagram_engine import QwenVLDiagramEngine
+from stage4_llm_orchestrator import Stage4LLMOrchestrator
 from custom_course_ingestor import ingest_custom_course_package
 from student_env import ACTION_NAMES, STATE_FEATURE_NAMES
 from curriculum_bank import (
@@ -74,6 +76,9 @@ class KnowledgeQuestAIEngine:
         grader_device: str = None,
         vlm_mode: str = 'hybrid',
         vlm_model_id: str = 'Qwen/Qwen3-VL-8B-Instruct',
+        llm_mode: str = 'fallback',
+        reasoner_model_id: str = 'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B',
+        stylizer_model_id: str = 'NousResearch/Meta-Llama-3.1-8B-Instruct',
     ):
         t0 = time.perf_counter()
         cpu = torch.device('cpu')
@@ -191,6 +196,15 @@ class KnowledgeQuestAIEngine:
             'diagrams': len(self.vlm_engine.diagrams_list),
             'vqa_challenges': len(self.vlm_engine.diagrams_list),
         }
+        # 6 & 7. Load Stage 4 Distributed 2-LLM Pipeline:
+        #   - Model #6: Pedagogical Reasoner (`DeepSeek-R1-Distill-Qwen-7B`, cuda:0)
+        #   - Model #7: Persona Stylizer (`Meta-Llama-3.1-8B-Instruct` + QLoRA, auto 2x T4)
+        self.llm_orchestrator = Stage4LLMOrchestrator(
+            llm_mode=llm_mode,
+            reasoner_model_id=reasoner_model_id,
+            stylizer_model_id=stylizer_model_id,
+        )
+        self.llm_info = self.llm_orchestrator.get_info()
         self.boot_time_sec = round(time.perf_counter() - t0, 2)
 
     def create_session(self, profile: str = 'average', curriculum: list = None, course_id: str = None):
@@ -214,12 +228,14 @@ class KnowledgeQuestAIEngine:
             else:
                 self.vlm_engine._load_cached_extractions()
 
-        return PlayerSession(
+        sess = PlayerSession(
             self,
             profile=profile,
             curriculum=curriculum or DEFAULT_CURRICULUM,
             course_meta=course_meta,
         )
+        sess.prefetch_next_turns(persona_key='wild')
+        return sess
 
     def ingest_new_course(
         self,
@@ -232,17 +248,22 @@ class KnowledgeQuestAIEngine:
         profile: str = 'average',
         progress_cb=None,
     ):
-        pkg = ingest_custom_course_package(
-            course_title=course_title,
-            raw_notes=raw_notes,
-            image_base64=image_base64,
-            file_name=file_name,
-            file_base64=file_base64,
-            remote_vlm_url=remote_vlm_url,
-            vlm_engine=self.vlm_engine,
-            dino_evaluator=self.dino_evaluator,
-            progress_cb=progress_cb,
-        )
+        self.llm_orchestrator.set_vlm_busy(True)
+        try:
+            pkg = ingest_custom_course_package(
+                course_title=course_title,
+                raw_notes=raw_notes,
+                image_base64=image_base64,
+                file_name=file_name,
+                file_base64=file_base64,
+                remote_vlm_url=remote_vlm_url,
+                vlm_engine=self.vlm_engine,
+                dino_evaluator=self.dino_evaluator,
+                progress_cb=progress_cb,
+            )
+        finally:
+            self.llm_orchestrator.clear_caches()
+            self.llm_orchestrator.set_vlm_busy(False)
         return self.create_session(profile=profile, course_id=pkg['course_id']), pkg
 
 
@@ -296,6 +317,7 @@ class PlayerSession:
         self.consolidated = [False] * 5       # Earned [★] Concept Synthesis Badges!
         self.quest_completed = False
         self._variant_cursors = {}            # Per-(concept_id, tier) anti-repeat rotation
+        self.asked_questions = []             # Recent questions passed to Model #6 Reasoner to prevent repeats
 
         dkt = engine.dkt_model
         self.h_state = torch.zeros((dkt.num_layers, 1, dkt.hidden_dim), dtype=torch.float32)
@@ -457,14 +479,26 @@ class PlayerSession:
             return 0.68, 0.35, (0.36 if sec < 5.0 else 0.22)
         return 0.56, (0.52 if retries >= 2 else 0.44), 0.30
 
-    @torch.no_grad()
-    def plan_next_encounter(self, focus_concept_id: int = None, force_action: int = None) -> dict:
-        """
-        Runs Model #2 (`Double-DQN`) on the current 12-dim cognitive+affective state,
-        applies valid-action & Concept-Badge Synthesis gating, and pulls a non-repeating
-        question variant from the curriculum bank.
-        """
-        t0 = time.perf_counter()
+    def _build_prof_ada_spec(self, starter_name: str = 'your partner') -> dict:
+        weakest_c = int(np.argmin(self.mastery))
+        c_weak = self.curriculum[weakest_c]
+        bullets = c_weak.get('summary_bullets') or []
+        fact = bullets[0] if bullets else (c_weak.get('podcast_hint') or c_weak.get('title', ''))
+        return {
+            'course_id': self.course_id,
+            'course_title': self.course_title,
+            'weakest_concept_id': weakest_c,
+            'weakest_topic': c_weak.get('short_title') or c_weak.get('title') or f'Concept {weakest_c}',
+            'weakest_mastery': float(self.mastery[weakest_c]),
+            'overall_mastery': float(np.mean(self.mastery)),
+            'badges_earned': int(sum(self.consolidated)),
+            'win_streak': int(self.win_streak),
+            'frustration': float(self.frustrated),
+            'verified_fact': str(fact),
+            'starter_name': str(starter_name or 'your partner'),
+        }
+
+    def _select_rl_decision(self, focus_concept_id: int = None, force_action: int = None) -> tuple:
         focus_c = int(focus_concept_id) if focus_concept_id is not None else self._select_frontier_concept()
         state_vec = self.get_rl_state_vector(focus_concept_id=focus_c)
 
@@ -479,16 +513,11 @@ class PlayerSession:
         prereqs = self.prereq_graph.get(focus_c, [])
         has_weak_prereq = bool(prereqs) and min(self.mastery[p] for p in prereqs) < 0.68
 
-        # Mask Action [3] (Prereq Review) when focus concept is a root node or prereqs are already solid
         effective_q = list(q_vals)
         if not has_weak_prereq:
             effective_q[3] = -1e9
         chosen_action = int(np.argmax(effective_q))
 
-        # Concept Badge Synthesis Gate:
-        # Once multiple-choice mastery reaches >= 68% (with prereqs met & no active fail streak),
-        # or if Boredom >= 28% at >= 62% mastery, challenge the player with Action [4]
-        # (Open-Text Boss Synthesis graded by DeBERTa-v3-Small) to earn the [★] Concept Badge!
         decision_reason = 'Double-DQN Optimal Q-Value'
         if force_action is None and has_weak_prereq and min(self.mastery[p] for p in prereqs) < 0.52:
             chosen_action = 3
@@ -510,15 +539,116 @@ class PlayerSession:
             chosen_action = int(force_action)
             decision_reason = 'Manual Override'
 
-        rl_ms = (time.perf_counter() - t0) * 1000.0
-
-        hint_text = None
-        hint_audio = None
         if chosen_action == 3 and prereqs:
             target_c = min(prereqs, key=lambda p: self.mastery[p])
         else:
             target_c = focus_c
+        return focus_c, target_c, chosen_action, decision_reason, q_vals, state_vec
 
+    def prefetch_next_turns(self, persona_key: str = 'wild'):
+        """Schedules asynchronous Stage 4 LLM prefetching so upcoming battles & Prof. Ada feel instant."""
+        orch = getattr(self.engine, 'llm_orchestrator', None)
+        if orch is None or not orch.is_live():
+            return
+        try:
+            _, target_c, chosen_action, _, _, _ = self._select_rl_decision()
+            c_data = self.curriculum[target_c]
+            tier_key = (
+                'boss_open' if chosen_action == 4 else (
+                    'medium_mc' if (chosen_action == 2 or (chosen_action == 3 and self.mastery[target_c] >= 0.45)) else 'easy_mc'
+                )
+            )
+            pool = c_data[tier_key]
+            fb_item = pool if isinstance(pool, dict) else pool[0]
+            spec = {
+                'course_id': self.course_id,
+                'course_title': self.course_title,
+                'concept_id': target_c,
+                'concept_data': c_data,
+                'rl_action': chosen_action,
+                'rl_action_name': ACTION_NAMES[chosen_action],
+                'mastery': float(self.mastery[target_c]),
+                'affect': {
+                    'concentrating': float(self.concentrating),
+                    'frustrated': float(self.frustrated),
+                    'bored': float(self.bored),
+                },
+                'win_streak': int(self.win_streak),
+                'fallback_item': fb_item,
+                'persona_key': persona_key or 'wild',
+                'asked_history': list(self.asked_questions[-6:]),
+            }
+            orch.schedule_encounter_prefetch(spec)
+            orch.schedule_prof_ada_prefetch(self._build_prof_ada_spec())
+        except Exception:
+            pass
+
+    def get_npc_dialogue(self, npc_key: str = 'prof_ada', starter_name: str = 'your partner') -> dict:
+        """Generates live DKT-driven retro-GBA dialogue for Prof. ADA or an overworld trainer."""
+        orch = getattr(self.engine, 'llm_orchestrator', None)
+        if npc_key == 'prof_ada' or not npc_key:
+            ada_spec = self._build_prof_ada_spec(starter_name=starter_name)
+            if orch is not None:
+                return orch.get_or_generate_prof_ada(ada_spec, allow_blocking=True)
+            return {
+                'npc': 'prof_ada',
+                'speaker': 'ADA',
+                'lines': [
+                    f"ADA: Your mastery on {self.course_title[:26]} is {round(float(np.mean(self.mastery))*100)}%.",
+                    f"ADA: Focus next on {ada_spec['weakest_topic']} ({round(ada_spec['weakest_mastery']*100)}%).",
+                ],
+                'source': 'persona_template',
+                'model_name': 'Template',
+                'cache_hit': False,
+            }
+        # Trainer stylized pre-battle taunt
+        trainer_c_map = {'tr_rex': 0, 'tr_cal': 1, 'tr_mira': 2, 'tr_rocco': 3, 'tr_mason': 4}
+        cid = trainer_c_map.get(npc_key, self._select_frontier_concept())
+        c_data = self.curriculum[cid]
+        bullets = c_data.get('summary_bullets') or []
+        fact = bullets[0] if bullets else c_data.get('title', '')
+        if orch is not None:
+            banter = orch.stylizer.generate_battle_banter(
+                persona_key=npc_key,
+                topic=c_data.get('short_title') or c_data.get('title') or f'C{cid}',
+                verified_fact=fact,
+                rl_action=4 if npc_key == 'tr_mason' else 2,
+                rl_action_name=ACTION_NAMES[4 if npc_key == 'tr_mason' else 2],
+                mastery=float(self.mastery[cid]),
+                affect={'concentrating': self.concentrating, 'frustrated': self.frustrated, 'bored': self.bored},
+                win_streak=self.win_streak,
+            )
+            return {
+                'npc': npc_key,
+                'speaker': banter['speaker'],
+                'lines': [banter['intro_taunt']],
+                'source': banter['source'],
+                'model_name': banter['model_name'],
+                'cache_hit': False,
+            }
+        return {'npc': npc_key, 'speaker': npc_key.upper(), 'lines': [], 'source': 'none', 'model_name': 'Template', 'cache_hit': False}
+
+    @torch.no_grad()
+    def plan_next_encounter(
+        self,
+        focus_concept_id: int = None,
+        force_action: int = None,
+        persona_key: str = 'wild',
+    ) -> dict:
+        """
+        Runs Model #2 (`Double-DQN`) on the current 12-dim cognitive+affective state,
+        applies valid-action & Concept-Badge Synthesis gating, and dispatches through
+        Stage 4 (`Model #6 DeepSeek-R1-7B` + `Model #7 Llama-3.1-8B QLoRA`) with
+        instant background prefetching and verified curriculum fallback.
+        """
+        t0 = time.perf_counter()
+        focus_c, target_c, chosen_action, decision_reason, q_vals, state_vec = self._select_rl_decision(
+            focus_concept_id=focus_concept_id, force_action=force_action
+        )
+        rl_ms = (time.perf_counter() - t0) * 1000.0
+
+        hint_text = None
+        hint_audio = None
         c_data = self.curriculum[target_c]
         if chosen_action == 0:
             hint_text = c_data['podcast_hint']
@@ -546,6 +676,49 @@ class PlayerSession:
         else:
             raise ValueError(f"Unsupported RL action: {chosen_action}")
 
+        # Stage 4 Multi-Agent LLM Pipeline (Model #6 Reasoner -> Model #7 Persona Stylizer)
+        p_key = str(persona_key or 'wild')
+        orch = getattr(self.engine, 'llm_orchestrator', None)
+        llm_bundle = None
+        if orch is not None:
+            spec = {
+                'course_id': self.course_id,
+                'course_title': self.course_title,
+                'concept_id': target_c,
+                'concept_data': c_data,
+                'rl_action': chosen_action,
+                'rl_action_name': ACTION_NAMES[chosen_action],
+                'mastery': float(self.mastery[target_c]),
+                'affect': {
+                    'concentrating': float(self.concentrating),
+                    'frustrated': float(self.frustrated),
+                    'bored': float(self.bored),
+                },
+                'win_streak': int(self.win_streak),
+                'fallback_item': q_item,
+                'persona_key': p_key,
+                'asked_history': list(self.asked_questions[-6:]),
+            }
+            llm_bundle = orch.get_or_generate_encounter(spec, allow_blocking=True)
+
+        r_out = llm_bundle['reasoner'] if llm_bundle else None
+        s_out = llm_bundle['stylizer'] if llm_bundle else None
+
+        final_q = r_out['question'] if r_out else q_item['question']
+        final_choices = r_out['choices'] if r_out else q_item.get('choices')
+        final_cidx = r_out['correct_idx'] if r_out else q_item.get('correct_idx')
+        final_ref = r_out['reference_answer'] if r_out else q_item['reference']
+        socratic_hint = r_out.get('socratic_hint') if r_out else None
+
+        # Enrich available hint with Model #6's targeted Socratic hint (or keep course podcast hint)
+        avail_hint = socratic_hint or c_data.get('podcast_hint')
+        if chosen_action == 0 and socratic_hint:
+            hint_text = socratic_hint
+
+        self.asked_questions.append(final_q)
+        if len(self.asked_questions) > 12:
+            self.asked_questions = self.asked_questions[-12:]
+
         enc = {
             'turn': self.turn + 1,
             'rl_action': chosen_action,
@@ -562,12 +735,25 @@ class PlayerSession:
             'mode': mode,
             'podcast_hint': hint_text,
             'podcast_audio': hint_audio,
-            'available_podcast_hint': c_data.get('podcast_hint'),
+            'available_podcast_hint': avail_hint,
             'available_podcast_audio': c_data.get('podcast_audio'),
-            'question': q_item['question'],
-            'choices': q_item.get('choices'),
-            'correct_idx': q_item.get('correct_idx'),
-            'reference_answer': q_item['reference'],
+            'socratic_hint': socratic_hint,
+            'question': final_q,
+            'choices': final_choices,
+            'correct_idx': final_cidx,
+            'reference_answer': final_ref,
+            'persona_key': p_key,
+            'persona_banter': s_out,
+            'llm_meta': {
+                'reasoner_model': r_out['model_name'] if r_out else 'Curriculum Bank',
+                'reasoner_source': r_out['source'] if r_out else 'curriculum_bank',
+                'reasoner_ms': r_out['latency_ms'] if r_out else 0.0,
+                'stylizer_model': s_out['model_name'] if s_out else 'Template',
+                'stylizer_source': s_out['source'] if s_out else 'persona_template',
+                'stylizer_ms': s_out['latency_ms'] if s_out else 0.0,
+                'cache_hit': bool(llm_bundle.get('cache_hit')) if llm_bundle else False,
+                'reasoning_trace': r_out.get('reasoning_trace', '') if r_out else '',
+            },
             'telemetry_meta': {
                 'item_diff': item_diff,
                 'is_main': is_main,
@@ -742,6 +928,14 @@ class PlayerSession:
         self.player_hp = max(1, self.player_hp - enemy_dmg)
         self.xp += xp_gained
 
+        p_banter = encounter.get('persona_banter') or {}
+        if verdict == 'correct':
+            persona_reaction = p_banter.get('on_correct')
+        elif verdict == 'partial':
+            persona_reaction = p_banter.get('on_partial')
+        else:
+            persona_reaction = p_banter.get('on_incorrect')
+
         record = {
             'turn': self.turn,
             'rl_action': action,
@@ -753,6 +947,9 @@ class PlayerSession:
             'grader': grader_detail,
             'reference_answer': encounter['reference_answer'],
             'correct_idx': encounter.get('correct_idx'),
+            'persona_reaction': persona_reaction,
+            'persona_speaker': p_banter.get('speaker'),
+            'llm_meta': encounter.get('llm_meta'),
             'badge_just_earned': badge_just_earned,
             'badges_earned_count': int(sum(self.consolidated)),
             'consolidated': list(self.consolidated),
@@ -783,6 +980,8 @@ class PlayerSession:
         }
         self.history.append(record)
         self.active_encounter = None
+        # Kick off non-blocking background Stage 4 prefetch for the NEXT turn!
+        self.prefetch_next_turns(persona_key=encounter.get('persona_key', 'wild'))
         return record
 
     def get_diagram_puzzles(self, concept_id: int = None) -> list:
@@ -1008,6 +1207,7 @@ class PlayerSession:
                 'grader': self.engine.grader_info,
                 'dino': self.engine.dino_info,
                 'vlm': self.engine.vlm_info,
+                'llm': self.engine.llm_info,
                 'boot_time_sec': self.engine.boot_time_sec,
             },
             'last_turn': self.history[-1] if self.history else None,

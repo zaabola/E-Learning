@@ -57,6 +57,7 @@ VLM_SYSTEM_PROMPT = (
     "Inspect ONLY the provided technical slide/diagram image and its slide text context. "
     "Write questions and summaries in the SAME language as the slide (French if the slide is in French, English if in English). "
     "CRITICAL: For each component's `target_label`, copy the EXACT verbatim text printed inside a visible box, cloud, oval, or table row in THIS image (e.g. 'DBWn', 'Cache de tampons de la base de données', 'DBA') — NEVER translate printed labels and NEVER use placeholder words! "
+    "Pick 2 visually DISTINCT, well-separated components in the figure (prefer separate boxes/blocks/sections over two tiny adjacent lines right next to each other when larger blocks exist). "
     "Keep every string concise (1 short sentence). Return ONLY a valid JSON object matching this schema:\n"
     "{\n"
     '  "is_educational_diagram": true,\n'
@@ -404,11 +405,13 @@ class QwenVLDiagramEngine:
         raise RuntimeError(f"Failed to load any live Qwen-VL model ({candidates}): {last_err}")
 
     @staticmethod
-    def _crop_letterbox_and_align28(img: Image.Image, stride: int = 28):
+    def _crop_letterbox_and_align28(img: Image.Image, stride: int = 28, high_res: bool = False):
         """
         Strips solid dark letterbox bars (RGB ~ 14, 22, 36) so Qwen-VL sees ONLY
         the active diagram at maximum resolution, and aligns it to exact multiples of
         `stride` (32px for Qwen3-VL, 28px for Qwen2.5-VL) for crisp fast tiling.
+        When `high_res=True` (for visual grounding), upscales landscape/small diagrams
+        so narrow table rows span multiple vision patches instead of collapsing into 1 patch!
         Returns `(aligned_img, (crop_x1, crop_y1, crop_w, crop_h))`.
         """
         import numpy as np
@@ -434,11 +437,20 @@ class QwenVLDiagramEngine:
             x1, y1, cw, ch = 0, 0, W, H
             cropped = rgb
 
-        # Keep sharp text at ~640x480 (Qwen3 32px -> 300 tokens!) or ~616x448 (Qwen2.5 28px)
-        max_w = 640.0 if stride == 32 else 616.0
-        max_h = 480.0 if stride == 32 else 448.0
-        scale = min(max_w / max(1, cw), max_h / max(1, ch))
-        scale = max(1.0, scale)
+        if high_res:
+            # High-resolution grounding grid: ensure >=14 vertical patches on wide slides
+            # (e.g. 720x288 -> 1088x448) so stacked table rows stay cleanly separated!
+            max_w = 1088.0 if stride == 32 else 980.0
+            max_h = 768.0 if stride == 32 else 700.0
+            scale = min(max_w / max(1, cw), max_h / max(1, ch))
+            scale = max(1.0, scale)
+        else:
+            # Pass-1 JSON comprehension: compact ~640x480 (~300 tokens) for fast generation
+            max_w = 640.0 if stride == 32 else 616.0
+            max_h = 480.0 if stride == 32 else 448.0
+            scale = min(max_w / max(1, cw), max_h / max(1, ch))
+            scale = max(1.0, scale)
+
         w_al = max(stride * 10, int(round((cw * scale) / float(stride))) * stride)
         h_al = max(stride * 8, int(round((ch * scale) / float(stride))) * stride)
         aligned = cropped.resize(
@@ -488,8 +500,8 @@ class QwenVLDiagramEngine:
 
         cx = 0.5 * (px1 + px2)
         cy = 0.5 * (py1 + py2)
-        bw = max(46.0, px2 - px1)
-        bh = max(34.0, py2 - py1)
+        bw = max(36.0, px2 - px1)
+        bh = max(24.0, py2 - py1)
         final_box = [
             round(max(2.0, cx - 0.5 * bw), 1),
             round(max(2.0, cy - 0.5 * bh), 1),
@@ -498,14 +510,147 @@ class QwenVLDiagramEngine:
         ]
         return final_box, coord_mode
 
+    def refine_box_zoom_live(
+        self,
+        img: Image.Image,
+        target_label: str,
+        coarse_box: list,
+        diagram_rect: tuple,
+    ) -> list:
+        """
+        Stage-2 Pure-VLM Zoom-In Grounding Pass (3x effective visual patch resolution!):
+        Crops a generous neighborhood around the coarse Qwen-VL box so tight table rows
+        (e.g. `TABLE_NAME` vs `COMMENTS`) or small ovals (`DBWn` vs `SMON`) span multiple
+        32px vision patches, then asks Qwen-VL to pinpoint ONLY `target_label`.
+        """
+        width, height = img.size
+        cx1, cy1, cw, ch = diagram_rect
+        bx1, by1, bx2, by2 = [float(v) for v in coarse_box]
+        bw = max(20.0, bx2 - bx1)
+        bh = max(16.0, by2 - by1)
+
+        # Only zoom-refine small/medium boxes (<45% of diagram area) where 1-patch drift hurts
+        diag_area = max(1.0, float(cw * ch))
+        if (bw * bh) / diag_area >= 0.45:
+            return coarse_box
+
+        low_id = (self.model_id or "").lower()
+        is_qwen3 = "qwen3" in low_id
+        is_qwen25 = ("2.5" in low_id or "2_5" in low_id) and not is_qwen3
+        stride = 32 if is_qwen3 else 28
+
+        pad_x = max(120.0, bw * 1.15)
+        pad_y = max(90.0, bh * 1.75)
+        zx1 = max(int(cx1), int(round(bx1 - pad_x)))
+        zy1 = max(int(cy1), int(round(by1 - pad_y)))
+        zx2 = min(int(cx1 + cw), int(round(bx2 + pad_x)))
+        zy2 = min(int(cy1 + ch), int(round(by2 + pad_y)))
+        zw, zh = zx2 - zx1, zy2 - zy1
+        if zw < 80 or zh < 60:
+            return coarse_box
+
+        zoom_crop = img.convert("RGB").crop((zx1, zy1, zx2, zy2))
+        scale = min(544.0 / float(zw), 416.0 / float(zh))
+        scale = max(1.0, scale)
+        aw = max(stride * 8, int(round((zw * scale) / float(stride))) * stride)
+        ah = max(stride * 6, int(round((zh * scale) / float(stride))) * stride)
+        aligned_zoom = zoom_crop.resize(
+            (aw, ah),
+            Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC,
+        )
+
+        ip = getattr(self.vlm_processor, "image_processor", None)
+        if ip is not None:
+            px_area = aw * ah
+            unit = stride * stride
+            if hasattr(ip, "min_pixels"):
+                ip.min_pixels = min(px_area, 128 * unit)
+            if hasattr(ip, "max_pixels"):
+                ip.max_pixels = max(px_area, 1024 * unit)
+            if hasattr(ip, "size") and isinstance(ip.size, dict):
+                ip.size["shortest_edge"] = min(px_area, 128 * unit)
+                ip.size["longest_edge"] = max(px_area, 1024 * unit)
+
+        zoom_prompt = (
+            f'This is a zoomed-in crop of a technical diagram. Locate ONLY the exact box, '
+            f'table cell, oval, cloud, or container that holds "{target_label}" '
+            f'(be careful NOT to box an adjacent row or neighboring label above or below it!). '
+            f'Output ONLY JSON: [{{"bbox_2d": [x1, y1, x2, y2], "label": "{target_label}"}}]'
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": aligned_zoom},
+                    {"type": "text", "text": zoom_prompt},
+                ],
+            }
+        ]
+        t0 = time.perf_counter()
+        text_input = self.vlm_processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.vlm_processor(
+            text=[text_input],
+            images=[aligned_zoom],
+            padding=True,
+            return_tensors="pt",
+        )
+        inputs.pop("token_type_ids", None)
+        inputs = inputs.to(self.vlm_model.device)
+
+        model_w, model_h = float(aw), float(ah)
+        if "image_grid_thw" in inputs and inputs["image_grid_thw"] is not None:
+            thw = inputs["image_grid_thw"][0].detach().cpu().tolist()
+            if len(thw) == 3:
+                patch_px = 16.0 if is_qwen3 else 14.0
+                model_h = float(thw[1]) * patch_px
+                model_w = float(thw[2]) * patch_px
+
+        with torch.no_grad():
+            gen_ids = self.vlm_model.generate(
+                **inputs,
+                max_new_tokens=64,
+                do_sample=False,
+            )
+        trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], gen_ids)]
+        raw = self.vlm_processor.batch_decode(
+            trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0]
+        dt = time.perf_counter() - t0
+
+        m_arr = re.search(
+            r'"bbox_2d"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]',
+            raw,
+        )
+        if not m_arr:
+            return coarse_box
+        raw_b = [float(m_arr.group(i)) for i in range(1, 5)]
+        zbox, cmode = self._decode_raw_box_to_canvas(
+            raw_b, is_qwen3, is_qwen25, model_w, model_h, (zx1, zy1, zw, zh), width, height
+        )
+        # Reject degenerate full-crop boxes (>92% of zoom window area)
+        z_area = max(1.0, (zbox[2] - zbox[0]) * (zbox[3] - zbox[1]))
+        if z_area > 0.92 * float(zw * zh):
+            return coarse_box
+
+        print(
+            f"  [{self.short_model_name} ZOOM-REFINE {dt:.1f}s] '{target_label}' | zoom=({zx1},{zy1},{zw}x{zh}) -> {aw}x{ah} | raw={raw_b} -> canvas={zbox}",
+            flush=True,
+        )
+        return zbox
+
     def ground_components_batch_live(
         self,
         img: Image.Image,
         target_labels: list,
     ) -> list:
         """
-        Fast single-pass native Qwen-VL visual grounding for BOTH diagram targets at once
-        (cuts grounding VLM image-encoding calls in HALF while preserving full container accuracy).
+        2-Stage Pure-VLM Visual Grounding:
+          Stage 1: High-res full-diagram batched grounding (`~1088x768`, 14-22 vertical patches)
+                   for BOTH targets at once.
+          Stage 2: Automatic 3x Zoom-In refinement (`refine_box_zoom_live`) for small/medium
+                   targets so stacked table rows and tiny ovals align to the exact pixel!
         """
         self.load_live_vlm()
         width, height = img.size
@@ -514,7 +659,7 @@ class QwenVLDiagramEngine:
         is_qwen25 = ("2.5" in low_id or "2_5" in low_id) and not is_qwen3
         stride = 32 if is_qwen3 else 28
 
-        aligned_img, crop_rect = self._crop_letterbox_and_align28(img, stride=stride)
+        aligned_img, crop_rect = self._crop_letterbox_and_align28(img, stride=stride, high_res=True)
         aw, ah = aligned_img.size
 
         ip = getattr(self.vlm_processor, "image_processor", None)
@@ -524,10 +669,10 @@ class QwenVLDiagramEngine:
             if hasattr(ip, "min_pixels"):
                 ip.min_pixels = min(px_area, 256 * unit)
             if hasattr(ip, "max_pixels"):
-                ip.max_pixels = max(px_area, 1024 * unit)
+                ip.max_pixels = max(px_area, 1600 * unit)
             if hasattr(ip, "size") and isinstance(ip.size, dict):
                 ip.size["shortest_edge"] = min(px_area, 256 * unit)
-                ip.size["longest_edge"] = max(px_area, 1024 * unit)
+                ip.size["longest_edge"] = max(px_area, 1600 * unit)
 
         lbl_lines = "\n".join([f'{i + 1}. "{lbl}"' for i, lbl in enumerate(target_labels)])
         schema_example = ", ".join(
@@ -626,11 +771,15 @@ class QwenVLDiagramEngine:
                 cbox, cmode = self._decode_raw_box_to_canvas(
                     raw_b, is_qwen3, is_qwen25, model_w, model_h, crop_rect, width, height
                 )
-                out_boxes[idx] = cbox
                 print(
-                    f"  [{self.short_model_name} GROUND-BATCH {dt:.1f}s] '{lbl}' | mode={cmode} | raw={raw_b} -> canvas={cbox}",
+                    f"  [{self.short_model_name} GROUND-BATCH {dt:.1f}s] '{lbl}' | mode={cmode} | aligned={aw}x{ah} | raw={raw_b} -> canvas={cbox}",
                     flush=True,
                 )
+                try:
+                    cbox = self.refine_box_zoom_live(img, lbl, cbox, crop_rect)
+                except Exception as z_exc:
+                    print(f"  [{self.short_model_name} ZOOM-REFINE] Skipped on '{lbl}': {z_exc}", flush=True)
+                out_boxes[idx] = cbox
         return out_boxes
 
     def ground_component_bbox_live(
@@ -838,8 +987,8 @@ class QwenVLDiagramEngine:
             else:
                 cx = 0.5 * (px_box[0] + px_box[2])
                 cy = 0.5 * (px_box[1] + px_box[3])
-                bw = max(46.0, px_box[2] - px_box[0])
-                bh = max(34.0, px_box[3] - px_box[1])
+                bw = max(36.0, px_box[2] - px_box[0])
+                bh = max(24.0, px_box[3] - px_box[1])
                 px_box = [
                     round(max(2.0, cx - 0.5 * bw), 1),
                     round(max(2.0, cy - 0.5 * bh), 1),

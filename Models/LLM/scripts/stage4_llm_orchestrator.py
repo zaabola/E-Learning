@@ -13,6 +13,7 @@ Model #7 (`Meta-Llama-3.1-8B-Instruct` + QLoRA Retro-GBA Persona Stylizer) with:
 
 import collections
 import queue
+import re
 import threading
 import time
 import torch
@@ -51,6 +52,8 @@ class Stage4LLMOrchestrator:
 
         self._gpu_lock = threading.Lock()
         self._cache_lock = threading.Lock()
+        self._priority_lock = threading.Lock()
+        self._interactive_pending = 0
         self._vlm_busy = threading.Event()
 
         # Key -> deque of pre-generated encounter dicts (Reasoner + Stylizer)
@@ -105,6 +108,14 @@ class Stage4LLMOrchestrator:
                     pass
         else:
             self._vlm_busy.clear()
+
+    def _begin_interactive(self):
+        with self._priority_lock:
+            self._interactive_pending += 1
+
+    def _end_interactive(self):
+        with self._priority_lock:
+            self._interactive_pending = max(0, self._interactive_pending - 1)
 
     def clear_caches(self):
         with self._cache_lock:
@@ -201,7 +212,11 @@ class Stage4LLMOrchestrator:
                 "cache_hit": False,
             }
 
-        bundle = self._build_encounter_bundle(spec)
+        self._begin_interactive()
+        try:
+            bundle = self._build_encounter_bundle(spec)
+        finally:
+            self._end_interactive()
         bundle["cache_hit"] = False
         return bundle
 
@@ -265,18 +280,22 @@ class Stage4LLMOrchestrator:
             out["cache_hit"] = False
             return out
 
-        with self._gpu_lock:
-            out = self.stylizer.generate_prof_ada_briefing(
-                course_title=ada_spec["course_title"],
-                weakest_topic=ada_spec["weakest_topic"],
-                weakest_mastery=ada_spec["weakest_mastery"],
-                overall_mastery=ada_spec["overall_mastery"],
-                badges_earned=ada_spec["badges_earned"],
-                win_streak=ada_spec["win_streak"],
-                frustration=ada_spec["frustration"],
-                verified_fact=ada_spec["verified_fact"],
-                starter_name=ada_spec.get("starter_name", "your partner"),
-            )
+        self._begin_interactive()
+        try:
+            with self._gpu_lock:
+                out = self.stylizer.generate_prof_ada_briefing(
+                    course_title=ada_spec["course_title"],
+                    weakest_topic=ada_spec["weakest_topic"],
+                    weakest_mastery=ada_spec["weakest_mastery"],
+                    overall_mastery=ada_spec["overall_mastery"],
+                    badges_earned=ada_spec["badges_earned"],
+                    win_streak=ada_spec["win_streak"],
+                    frustration=ada_spec["frustration"],
+                    verified_fact=ada_spec["verified_fact"],
+                    starter_name=ada_spec.get("starter_name", "your partner"),
+                )
+        finally:
+            self._end_interactive()
         with self._cache_lock:
             self._ada_cache[cache_key] = out
         out["cache_hit"] = False
@@ -328,8 +347,12 @@ class Stage4LLMOrchestrator:
             out["cache_hit"] = False
             return out
 
-        with self._gpu_lock:
-            out = self.stylizer.generate_course_story(course_title=course_title, concepts=concepts)
+        self._begin_interactive()
+        try:
+            with self._gpu_lock:
+                out = self.stylizer.generate_course_story(course_title=course_title, concepts=concepts)
+        finally:
+            self._end_interactive()
         with self._cache_lock:
             self._story_cache[course_id] = out
         out["cache_hit"] = False
@@ -348,6 +371,30 @@ class Stage4LLMOrchestrator:
             with self._cache_lock:
                 self._inflight.discard(("story", course_id))
 
+    def _fast_match_course_concept(self, student_question: str, course_title: str, concepts: list) -> tuple:
+        """Fast (<1 ms) lexical course-notes RAG lookup (3x title weight) for NPC Q&A."""
+        q_tokens = set(re.findall(r"[0-9a-zA-ZÀ-ÿ$_]{3,}", str(student_question or "").lower()))
+        best_c = None
+        best_score = -1
+        for idx, c in enumerate(concepts or []):
+            cid = int(c.get("concept_id", idx))
+            t_blob = f"{c.get('title', '')} {c.get('short_title', '')}".lower()
+            b_blob = " ".join(
+                [str(c.get("podcast_hint", ""))] + [str(b) for b in (c.get("summary_bullets") or [])]
+            ).lower()
+            t_tokens = set(re.findall(r"[0-9a-zA-ZÀ-ÿ$_]{3,}", t_blob))
+            b_tokens = set(re.findall(r"[0-9a-zA-ZÀ-ÿ$_]{3,}", b_blob))
+            score = 3 * len(q_tokens & t_tokens) + len(q_tokens & b_tokens)
+            if score > best_score:
+                best_score = score
+                best_c = c
+        if best_c is None:
+            return course_title, f"Review the key concepts of {course_title} in your Field Journal."
+        bullets = best_c.get("summary_bullets") or []
+        fact = str(bullets[0] if bullets else (best_c.get("podcast_hint") or best_c.get("title") or course_title))
+        matched_title = str(best_c.get("title") or best_c.get("short_title") or course_title)
+        return matched_title, fact
+
     def chat_with_npc(
         self,
         npc_key: str,
@@ -358,60 +405,63 @@ class Stage4LLMOrchestrator:
         chat_history: list = None,
     ) -> dict:
         """
-        Live 2-LLM interactive NPC Q&A:
-          1. Model #6 (`DeepSeek-R1-7B`) extracts a verified factual answer strictly from the active course/PDF notes.
-          2. Model #7 (`Llama-3.1-8B QLoRA`) delivers that answer in the NPC's humorous retro-RPG voice!
+        Live interactive NPC Q&A:
+          1. Instant (<1 ms) lexical RAG extracts matched concept + verified fact from course/PDF notes.
+          2. Base `Meta-Llama-3.1-8B-Instruct` (via `_base_model_ctx()`) converses naturally in the
+             player's own language (English or French) with humor + all 5 course concepts!
         """
         overall_m = sum(float(x) for x in mastery_vec) / max(1, len(mastery_vec)) if mastery_vec else 0.5
-        if (not self.is_live()) or self._vlm_busy.is_set():
-            fact_res = self.reasoner.answer_course_question(
-                student_question=student_question,
-                course_title=course_title,
-                concepts=concepts,
-                mastery_vec=mastery_vec,
-            )
+        matched_concept, verified_fact = self._fast_match_course_concept(
+            student_question=student_question,
+            course_title=course_title,
+            concepts=concepts,
+        )
+
+        if (not self.stylizer.is_live()) or self._vlm_busy.is_set():
             rep = self.stylizer.generate_npc_chat_reply(
                 npc_key=npc_key,
                 student_question=student_question,
-                verified_fact=fact_res["verified_fact"],
+                verified_fact=verified_fact,
                 course_title=course_title,
-                matched_concept=fact_res["matched_concept"],
+                matched_concept=matched_concept,
                 overall_mastery=overall_m,
                 chat_history=chat_history,
-                language=fact_res["language"],
+                language=None,
+                concepts=concepts,
+                mastery_vec=mastery_vec,
             )
-            rep["reasoner_source"] = fact_res["source"]
-            rep["reasoner_ms"] = fact_res["latency_ms"]
+            rep["reasoner_source"] = "course_notes_rag"
+            rep["reasoner_ms"] = 0.0
             return rep
 
-        with self._gpu_lock:
-            fact_res = self.reasoner.answer_course_question(
-                student_question=student_question,
-                course_title=course_title,
-                concepts=concepts,
-                mastery_vec=mastery_vec,
-            )
-            rep = self.stylizer.generate_npc_chat_reply(
-                npc_key=npc_key,
-                student_question=student_question,
-                verified_fact=fact_res["verified_fact"],
-                course_title=course_title,
-                matched_concept=fact_res["matched_concept"],
-                overall_mastery=overall_m,
-                chat_history=chat_history,
-                language=fact_res["language"],
-            )
-        rep["reasoner_source"] = fact_res["source"]
-        rep["reasoner_ms"] = fact_res["latency_ms"]
+        self._begin_interactive()
+        try:
+            with self._gpu_lock:
+                rep = self.stylizer.generate_npc_chat_reply(
+                    npc_key=npc_key,
+                    student_question=student_question,
+                    verified_fact=verified_fact,
+                    course_title=course_title,
+                    matched_concept=matched_concept,
+                    overall_mastery=overall_m,
+                    chat_history=chat_history,
+                    language=None,
+                    concepts=concepts,
+                    mastery_vec=mastery_vec,
+                )
+        finally:
+            self._end_interactive()
+        rep["reasoner_source"] = "course_notes_rag"
+        rep["reasoner_ms"] = 0.0
         return rep
 
     def _prefetch_loop(self):
         while True:
             kind, cache_key, spec = self._prefetch_q.get()
             try:
-                # Yield cleanly if PDF ingestion is currently using the GPUs
-                while self._vlm_busy.is_set():
-                    time.sleep(0.5)
+                # Yield cleanly if PDF ingestion OR any interactive player call is active
+                while self._vlm_busy.is_set() or self._interactive_pending > 0:
+                    time.sleep(0.25)
                 if kind == "story":
                     with self._gpu_lock:
                         out = self.stylizer.generate_course_story(

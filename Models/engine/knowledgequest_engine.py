@@ -620,71 +620,138 @@ class PlayerSession:
             return self.course_story
         return self.course_story or {}
 
-    def chat_with_npc(self, npc_key: str, student_question: str) -> dict:
-        pk = str(npc_key or 'prof_ada')
-        q_clean = str(student_question or '').strip()
-        hist = self.npc_chat_histories.setdefault(pk, [])
+    def prepare_course_story_ctx(self) -> dict:
+        """Captures story inputs under `st.lock` so server can generate without holding the lock."""
+        cached_live = (
+            self.course_story
+            if (self.course_story is not None and self.course_story.get('source', '').startswith('live'))
+            else None
+        )
+        return {
+            'cached_live': cached_live,
+            'course_id': self.course_id,
+            'course_title': self.course_title,
+            'concepts': list(self.curriculum),
+        }
+
+    def run_course_story_from_ctx(self, ctx: dict, allow_blocking: bool = True) -> dict:
+        if ctx.get('cached_live') is not None:
+            return ctx['cached_live']
         orch = getattr(self.engine, 'llm_orchestrator', None)
         if orch is not None:
-            res = orch.chat_with_npc(
+            return orch.get_or_generate_course_story(
+                course_id=ctx['course_id'],
+                course_title=ctx['course_title'],
+                concepts=ctx['concepts'],
+                allow_blocking=allow_blocking,
+            )
+        return {}
+
+    def finalize_course_story(self, story: dict) -> dict:
+        if isinstance(story, dict) and (story.get('source', '').startswith('live') or self.course_story is None):
+            self.course_story = story
+        return self.course_story or story or {}
+
+    def prepare_npc_chat_ctx(self, npc_key: str, student_question: str) -> dict:
+        pk = str(npc_key or 'prof_ada')
+        q_clean = str(student_question or '').strip()
+        return {
+            'npc_key': pk,
+            'question': q_clean,
+            'course_title': self.course_title,
+            'concepts': list(self.curriculum),
+            'mastery_vec': [float(v) for v in self.mastery],
+            'chat_history': list(self.npc_chat_histories.get(pk, [])),
+        }
+
+    def run_npc_chat_from_ctx(self, ctx: dict) -> dict:
+        pk = ctx['npc_key']
+        q_clean = ctx['question']
+        orch = getattr(self.engine, 'llm_orchestrator', None)
+        if orch is not None:
+            return orch.chat_with_npc(
                 npc_key=pk,
                 student_question=q_clean,
-                course_title=self.course_title,
-                concepts=self.curriculum,
-                mastery_vec=[float(v) for v in self.mastery],
-                chat_history=hist,
+                course_title=ctx['course_title'],
+                concepts=ctx['concepts'],
+                mastery_vec=ctx['mastery_vec'],
+                chat_history=ctx['chat_history'],
             )
-        else:
-            res = {
-                'npc': pk,
-                'speaker': pk.upper(),
-                'reply': f"{pk.upper()}: Check your Field Journal for notes on {self.course_title}!",
-                'verified_fact': '',
-                'matched_concept': self.course_title,
-                'source': 'fallback',
-                'model_name': 'Template',
-                'latency_ms': 0.0,
-            }
-        hist.append({'role': 'user', 'content': q_clean})
-        hist.append({'role': 'assistant', 'content': res['reply']})
+        return {
+            'npc': pk,
+            'speaker': pk.upper(),
+            'reply': f"{pk.upper()}: Check your Field Journal for notes on {ctx['course_title']}!",
+            'verified_fact': '',
+            'matched_concept': ctx['course_title'],
+            'source': 'fallback',
+            'model_name': 'Template',
+            'latency_ms': 0.0,
+        }
+
+    def record_npc_chat_turn(self, npc_key: str, student_question: str, reply: str):
+        pk = str(npc_key or 'prof_ada')
+        hist = self.npc_chat_histories.setdefault(pk, [])
+        hist.append({'role': 'user', 'content': str(student_question or '').strip()})
+        hist.append({'role': 'assistant', 'content': str(reply or '')})
         if len(hist) > 8:
             self.npc_chat_histories[pk] = hist[-8:]
+
+    def chat_with_npc(self, npc_key: str, student_question: str) -> dict:
+        ctx = self.prepare_npc_chat_ctx(npc_key=npc_key, student_question=student_question)
+        res = self.run_npc_chat_from_ctx(ctx)
+        self.record_npc_chat_turn(ctx['npc_key'], ctx['question'], res['reply'])
         return res
 
-    def get_npc_dialogue(self, npc_key: str = 'prof_ada', starter_name: str = 'your partner') -> dict:
-        """Generates live DKT-driven retro-GBA dialogue for Prof. ADA or an overworld trainer."""
+    def prepare_npc_dialogue_ctx(self, npc_key: str = 'prof_ada', starter_name: str = 'your partner') -> dict:
+        pk = npc_key or 'prof_ada'
+        trainer_c_map = {'tr_rex': 0, 'tr_cal': 1, 'tr_mira': 2, 'tr_rocco': 3, 'tr_mason': 4}
+        cid = trainer_c_map.get(pk, self._select_frontier_concept())
+        c_data = self.curriculum[cid]
+        bullets = c_data.get('summary_bullets') or []
+        fact = bullets[0] if bullets else c_data.get('title', '')
+        return {
+            'npc_key': pk,
+            'starter_name': starter_name,
+            'ada_spec': self._build_prof_ada_spec(starter_name=starter_name),
+            'course_title': self.course_title,
+            'cid': cid,
+            'topic': c_data.get('short_title') or c_data.get('title') or f'C{cid}',
+            'fact': fact,
+            'mastery_c': float(self.mastery[cid]),
+            'mean_mastery': float(np.mean(self.mastery)),
+            'affect': {'concentrating': self.concentrating, 'frustrated': self.frustrated, 'bored': self.bored},
+            'win_streak': self.win_streak,
+        }
+
+    def run_npc_dialogue_from_ctx(self, ctx: dict) -> dict:
+        npc_key = ctx['npc_key']
         orch = getattr(self.engine, 'llm_orchestrator', None)
+        ada_spec = ctx['ada_spec']
         if npc_key == 'prof_ada' or not npc_key:
-            ada_spec = self._build_prof_ada_spec(starter_name=starter_name)
             if orch is not None:
                 return orch.get_or_generate_prof_ada(ada_spec, allow_blocking=True)
             return {
                 'npc': 'prof_ada',
                 'speaker': 'ADA',
                 'lines': [
-                    f"ADA: Your mastery on {self.course_title[:26]} is {round(float(np.mean(self.mastery))*100)}%.",
+                    f"ADA: Your mastery on {ctx['course_title'][:26]} is {round(ctx['mean_mastery']*100)}%.",
                     f"ADA: Focus next on {ada_spec['weakest_topic']} ({round(ada_spec['weakest_mastery']*100)}%).",
                 ],
                 'source': 'persona_template',
                 'model_name': 'Template',
                 'cache_hit': False,
             }
-        # Trainer stylized pre-battle taunt
-        trainer_c_map = {'tr_rex': 0, 'tr_cal': 1, 'tr_mira': 2, 'tr_rocco': 3, 'tr_mason': 4}
-        cid = trainer_c_map.get(npc_key, self._select_frontier_concept())
-        c_data = self.curriculum[cid]
-        bullets = c_data.get('summary_bullets') or []
-        fact = bullets[0] if bullets else c_data.get('title', '')
         if orch is not None:
+            act = 4 if npc_key == 'tr_mason' else 2
             banter = orch.stylizer.generate_battle_banter(
                 persona_key=npc_key,
-                topic=c_data.get('short_title') or c_data.get('title') or f'C{cid}',
-                verified_fact=fact,
-                rl_action=4 if npc_key == 'tr_mason' else 2,
-                rl_action_name=ACTION_NAMES[4 if npc_key == 'tr_mason' else 2],
-                mastery=float(self.mastery[cid]),
-                affect={'concentrating': self.concentrating, 'frustrated': self.frustrated, 'bored': self.bored},
-                win_streak=self.win_streak,
+                topic=ctx['topic'],
+                verified_fact=ctx['fact'],
+                rl_action=act,
+                rl_action_name=ACTION_NAMES[act],
+                mastery=ctx['mastery_c'],
+                affect=ctx['affect'],
+                win_streak=ctx['win_streak'],
             )
             return {
                 'npc': npc_key,
@@ -696,19 +763,19 @@ class PlayerSession:
             }
         return {'npc': npc_key, 'speaker': npc_key.upper(), 'lines': [], 'source': 'none', 'model_name': 'Template', 'cache_hit': False}
 
+    def get_npc_dialogue(self, npc_key: str = 'prof_ada', starter_name: str = 'your partner') -> dict:
+        """Generates live DKT-driven retro-GBA dialogue for Prof. ADA or an overworld trainer."""
+        ctx = self.prepare_npc_dialogue_ctx(npc_key=npc_key, starter_name=starter_name)
+        return self.run_npc_dialogue_from_ctx(ctx)
+
     @torch.no_grad()
-    def plan_next_encounter(
+    def prepare_encounter_spec(
         self,
         focus_concept_id: int = None,
         force_action: int = None,
         persona_key: str = 'wild',
     ) -> dict:
-        """
-        Runs Model #2 (`Double-DQN`) on the current 12-dim cognitive+affective state,
-        applies valid-action & Concept-Badge Synthesis gating, and dispatches through
-        Stage 4 (`Model #6 DeepSeek-R1-7B` + `Model #7 Llama-3.1-8B QLoRA`) with
-        instant background prefetching and verified curriculum fallback.
-        """
+        """Computes Double-DQN decision & Stage 4 LLM spec quickly under `st.lock`."""
         t0 = time.perf_counter()
         focus_c, target_c, chosen_action, decision_reason, q_vals, state_vec = self._select_rl_decision(
             focus_concept_id=focus_concept_id, force_action=force_action
@@ -744,31 +811,60 @@ class PlayerSession:
         else:
             raise ValueError(f"Unsupported RL action: {chosen_action}")
 
-        # Stage 4 Multi-Agent LLM Pipeline (Model #6 Reasoner -> Model #7 Persona Stylizer)
         p_key = str(persona_key or 'wild')
-        orch = getattr(self.engine, 'llm_orchestrator', None)
-        llm_bundle = None
-        if orch is not None:
-            spec = {
-                'course_id': self.course_id,
-                'course_title': self.course_title,
-                'concept_id': target_c,
-                'concept_data': c_data,
-                'rl_action': chosen_action,
-                'rl_action_name': ACTION_NAMES[chosen_action],
-                'mastery': float(self.mastery[target_c]),
-                'affect': {
-                    'concentrating': float(self.concentrating),
-                    'frustrated': float(self.frustrated),
-                    'bored': float(self.bored),
-                },
-                'win_streak': int(self.win_streak),
-                'fallback_item': q_item,
-                'persona_key': p_key,
-                'asked_history': list(self.asked_questions[-6:]),
-            }
-            llm_bundle = orch.get_or_generate_encounter(spec, allow_blocking=True)
+        spec = {
+            'course_id': self.course_id,
+            'course_title': self.course_title,
+            'concept_id': target_c,
+            'concept_data': c_data,
+            'rl_action': chosen_action,
+            'rl_action_name': ACTION_NAMES[chosen_action],
+            'mastery': float(self.mastery[target_c]),
+            'affect': {
+                'concentrating': float(self.concentrating),
+                'frustrated': float(self.frustrated),
+                'bored': float(self.bored),
+            },
+            'win_streak': int(self.win_streak),
+            'fallback_item': q_item,
+            'persona_key': p_key,
+            'asked_history': list(self.asked_questions[-6:]),
+        }
+        return {
+            'focus_c': focus_c,
+            'target_c': target_c,
+            'chosen_action': chosen_action,
+            'decision_reason': decision_reason,
+            'q_vals': q_vals,
+            'rl_ms': rl_ms,
+            'state_vec': state_vec,
+            'hint_text': hint_text,
+            'hint_audio': hint_audio,
+            'c_data': c_data,
+            'q_item': q_item,
+            'mode': mode,
+            'telemetry_meta': {
+                'item_diff': item_diff,
+                'is_main': is_main,
+                'is_mc': is_mc,
+                'is_exam': is_exam,
+            },
+            'p_key': p_key,
+            'spec': spec,
+        }
 
+    def generate_encounter_llm_bundle(self, prep: dict):
+        """Runs Stage 4 LLMs outside `st.lock` so /api/status never stalls behind GPU generation."""
+        orch = getattr(self.engine, 'llm_orchestrator', None)
+        if orch is not None:
+            return orch.get_or_generate_encounter(prep['spec'], allow_blocking=True)
+        return None
+
+    def finalize_encounter(self, prep: dict, llm_bundle) -> dict:
+        c_data = prep['c_data']
+        q_item = prep['q_item']
+        chosen_action = prep['chosen_action']
+        target_c = prep['target_c']
         r_out = llm_bundle['reasoner'] if llm_bundle else None
         s_out = llm_bundle['stylizer'] if llm_bundle else None
 
@@ -778,7 +874,7 @@ class PlayerSession:
         final_ref = r_out['reference_answer'] if r_out else q_item['reference']
         socratic_hint = r_out.get('socratic_hint') if r_out else None
 
-        # Enrich available hint with Model #6's targeted Socratic hint (or keep course podcast hint)
+        hint_text = prep['hint_text']
         avail_hint = socratic_hint or c_data.get('podcast_hint')
         if chosen_action == 0 and socratic_hint:
             hint_text = socratic_hint
@@ -791,18 +887,18 @@ class PlayerSession:
             'turn': self.turn + 1,
             'rl_action': chosen_action,
             'rl_action_name': ACTION_NAMES[chosen_action],
-            'decision_reason': decision_reason,
-            'rl_q_values': [round(v, 3) for v in q_vals],
-            'rl_latency_ms': round(rl_ms, 3),
-            'state_vector': [round(float(x), 4) for x in state_vec],
-            'focus_concept_id': focus_c,
+            'decision_reason': prep['decision_reason'],
+            'rl_q_values': [round(v, 3) for v in prep['q_vals']],
+            'rl_latency_ms': round(prep['rl_ms'], 3),
+            'state_vector': [round(float(x), 4) for x in prep['state_vec']],
+            'focus_concept_id': prep['focus_c'],
             'target_concept_id': target_c,
             'target_concept_title': c_data['title'],
             'target_concept_short': c_data.get('short_title', c_data['title']),
             'target_mastery': round(float(self.mastery[target_c]), 4),
-            'mode': mode,
+            'mode': prep['mode'],
             'podcast_hint': hint_text,
-            'podcast_audio': hint_audio,
+            'podcast_audio': prep['hint_audio'],
             'available_podcast_hint': avail_hint,
             'available_podcast_audio': c_data.get('podcast_audio'),
             'socratic_hint': socratic_hint,
@@ -810,7 +906,7 @@ class PlayerSession:
             'choices': final_choices,
             'correct_idx': final_cidx,
             'reference_answer': final_ref,
-            'persona_key': p_key,
+            'persona_key': prep['p_key'],
             'persona_banter': s_out,
             'llm_meta': {
                 'reasoner_model': r_out['model_name'] if r_out else 'Curriculum Bank',
@@ -822,15 +918,31 @@ class PlayerSession:
                 'cache_hit': bool(llm_bundle.get('cache_hit')) if llm_bundle else False,
                 'reasoning_trace': r_out.get('reasoning_trace', '') if r_out else '',
             },
-            'telemetry_meta': {
-                'item_diff': item_diff,
-                'is_main': is_main,
-                'is_mc': is_mc,
-                'is_exam': is_exam,
-            },
+            'telemetry_meta': prep['telemetry_meta'],
         }
         self.active_encounter = enc
         return enc
+
+    @torch.no_grad()
+    def plan_next_encounter(
+        self,
+        focus_concept_id: int = None,
+        force_action: int = None,
+        persona_key: str = 'wild',
+    ) -> dict:
+        """
+        Runs Model #2 (`Double-DQN`) on the current 12-dim cognitive+affective state,
+        applies valid-action & Concept-Badge Synthesis gating, and dispatches through
+        Stage 4 (`Model #6 DeepSeek-R1-7B` + `Model #7 Llama-3.1-8B QLoRA`) with
+        instant background prefetching and verified curriculum fallback.
+        """
+        prep = self.prepare_encounter_spec(
+            focus_concept_id=focus_concept_id,
+            force_action=force_action,
+            persona_key=persona_key,
+        )
+        llm_bundle = self.generate_encounter_llm_bundle(prep)
+        return self.finalize_encounter(prep, llm_bundle)
 
     def submit_turn_response(
         self,

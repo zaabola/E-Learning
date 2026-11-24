@@ -380,13 +380,15 @@ const AITutor = (() => {
 
   async function init() {
     try {
-      const snap = await apiFetch('/api/status', { method: 'GET' }, 1800);
+      const snap = await apiFetch('/api/status', { method: 'GET' }, 8000);
       online = true;
       statusCache = snap;
       persistToPlayer(snap);
     } catch (e) {
-      online = false;
-      statusCache = buildOfflineStatus();
+      if (!statusCache) {
+        online = false;
+        statusCache = buildOfflineStatus();
+      }
     }
     return statusCache;
   }
@@ -416,12 +418,14 @@ const AITutor = (() => {
       const snap = await apiFetch('/api/session/sync', {
         method: 'POST',
         body: JSON.stringify(saved),
-      }, 2000);
+      }, 8000);
       online = true;
       statusCache = snap;
     } catch (e) {
-      online = false;
-      statusCache = buildOfflineStatus();
+      if (!statusCache) {
+        online = false;
+        statusCache = buildOfflineStatus();
+      }
     }
     return statusCache;
   }
@@ -442,14 +446,16 @@ const AITutor = (() => {
       const snap = await apiFetch('/api/session/reset', {
         method: 'POST',
         body: JSON.stringify({ course_id: courseId, profile }),
-      }, 3000);
+      }, 8000);
       online = true;
       statusCache = snap;
       persistToPlayer(snap);
     } catch (e) {
-      online = false;
-      statusCache = buildOfflineStatus();
-      persistToPlayer(statusCache);
+      if (!statusCache || courseId === 'vision_yolo_ocr') {
+        online = false;
+        statusCache = buildOfflineStatus();
+        persistToPlayer(statusCache);
+      }
     }
     return statusCache;
   }
@@ -605,9 +611,48 @@ const AITutor = (() => {
     }
 
     const targetId = (action === 3 && weakPre !== undefined) ? weakPre : focus;
-    const tc = FALLBACK_CONCEPTS[targetId];
-    const tier = action === 4 ? 'boss_open' : (action === 2 ? 'medium_mc' : 'easy_mc');
-    const q = pickLocalVariant(tc, tier);
+    const hasCustomCached = statusCache
+      && Array.isArray(statusCache.concepts)
+      && statusCache.concepts.length === 5
+      && statusCache.course_id
+      && statusCache.course_id !== 'vision_yolo_ocr';
+
+    let tc;
+    let q;
+    if (hasCustomCached) {
+      tc = statusCache.concepts[targetId] || statusCache.concepts[0];
+      const otherCs = statusCache.concepts.filter((_, idx) => idx !== targetId);
+      const b0 = (tc.summary_bullets && tc.summary_bullets[0]) || tc.podcast_hint || tc.title;
+      const isFr = /[éèêëàâçùûîïôœ]/i.test((tc.title || '') + ' ' + b0);
+      if (action === 4) {
+        q = {
+          question: isFr
+            ? `Explique clairement le rôle et le mécanisme de "${tc.title}" dans ce cours.`
+            : `Explain the role and mechanism of "${tc.title}" in this course.`,
+          choices: null,
+          correct_idx: null,
+          reference: b0,
+          keywords: String(b0 || '').toLowerCase().split(/\W+/).filter(w => w.length > 3),
+        };
+      } else {
+        const d1 = (otherCs[0] && ((otherCs[0].summary_bullets && otherCs[0].summary_bullets[0]) || otherCs[0].title)) || 'Module A only';
+        const d2 = (otherCs[1] && ((otherCs[1].summary_bullets && otherCs[1].summary_bullets[0]) || otherCs[1].title)) || 'Unrelated network hardware';
+        const d3 = (otherCs[2] && ((otherCs[2].summary_bullets && otherCs[2].summary_bullets[0]) || otherCs[2].title)) || 'Deprecated manual config only';
+        q = {
+          question: isFr
+            ? `Quel énoncé décrit correctement "${tc.title}" d'après votre cours ?`
+            : `Which statement accurately describes "${tc.title}" from your course?`,
+          choices: [String(b0).slice(0, 140), String(d1).slice(0, 140), String(d2).slice(0, 140), String(d3).slice(0, 140)],
+          correct_idx: 0,
+          reference: b0,
+          keywords: [],
+        };
+      }
+    } else {
+      tc = FALLBACK_CONCEPTS[targetId];
+      const tier = action === 4 ? 'boss_open' : (action === 2 ? 'medium_mc' : 'easy_mc');
+      q = pickLocalVariant(tc, tier);
+    }
 
     return {
       turn: localTurn + 1,
@@ -619,7 +664,7 @@ const AITutor = (() => {
       focus_concept_id: focus,
       target_concept_id: targetId,
       target_concept_title: tc.title,
-      target_concept_short: tc.short_title,
+      target_concept_short: tc.short_title || tc.title,
       target_mastery: localMastery[targetId],
       mode: action === 4 ? 'boss_open_text' : 'mc',
       podcast_hint: action === 0 ? tc.podcast_hint : null,
@@ -756,7 +801,16 @@ const AITutor = (() => {
       localAffect.frustrated = Math.min(0.92, localAffect.frustrated + 0.12);
     }
 
-    statusCache = buildOfflineStatus();
+    if (!statusCache || !statusCache.course_id || statusCache.course_id === 'vision_yolo_ocr') {
+      statusCache = buildOfflineStatus();
+    } else {
+      statusCache.turn = localTurn;
+      statusCache.mastery = localMastery.slice();
+      statusCache.consolidated = localBadges.slice();
+      statusCache.badges_earned_count = localBadges.filter(Boolean).length;
+      statusCache.quest_completed = localBadges.every(Boolean);
+      statusCache.affect = { ...localAffect };
+    }
     const rec = {
       turn: localTurn,
       rl_action: enc.rl_action,
@@ -788,24 +842,25 @@ const AITutor = (() => {
   }
 
   async function submitEncounter(enc, userResponse, responseSec, retries = 1, hintUsed = false) {
-    if (online) {
+    const reqBody = JSON.stringify({
+      encounter: enc,
+      user_response: userResponse,
+      response_sec: responseSec,
+      retries,
+      hint_used: hintUsed,
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        // Longer timeout (8s) in case CPU DeBERTa inference is running on a low-power laptop
         const data = await apiFetch('/api/encounter/submit', {
           method: 'POST',
-          body: JSON.stringify({
-            encounter: enc,
-            user_response: userResponse,
-            response_sec: responseSec,
-            retries,
-            hint_used: hintUsed,
-          }),
-        }, 8000);
+          body: reqBody,
+        }, 15000);
+        online = true;
         statusCache = data.status;
         persistToPlayer(data.status);
         return data.result;
       } catch (e) {
-        online = false;
+        if (attempt === 0) await new Promise(r => setTimeout(r, 350));
       }
     }
     return gradeOffline(enc, userResponse, responseSec, hintUsed);

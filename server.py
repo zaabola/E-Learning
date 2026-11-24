@@ -1,5 +1,5 @@
-"""
-KnowledgeQuest Live 3-Model Game & AI Server (`server.py`)
+r"""
+KnowledgeQuest Live 7-Model Game & AI Server (`server.py`)
 ==========================================================
 Serves the vanilla HTML/CSS/JS GBA RPG (`index.html`, `js/`, `css/`, `assets/`,
 `course_material/`) AND exposes real-time REST endpoints powered by all 3 custom
@@ -131,7 +131,11 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
         if route == '/api/course/story':
             st = self.server_state
             with st.lock:
-                story = st.session.get_course_story(allow_blocking=True)
+                sess = st.session
+                ctx = sess.prepare_course_story_ctx()
+            story = sess.run_course_story_from_ctx(ctx, allow_blocking=True)
+            with st.lock:
+                story = sess.finalize_course_story(story)
             self._send_json(story)
             return
         if route == '/api/npc/dialogue':
@@ -140,7 +144,9 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
             npc_key = (qs.get('npc') or ['prof_ada'])[0]
             starter_name = (qs.get('starter') or ['your partner'])[0]
             with st.lock:
-                dlg = st.session.get_npc_dialogue(npc_key=npc_key, starter_name=starter_name)
+                sess = st.session
+                ctx = sess.prepare_npc_dialogue_ctx(npc_key=npc_key, starter_name=starter_name)
+            dlg = sess.run_npc_dialogue_from_ctx(ctx)
             print(
                 f"  [NPC DIALOGUE] {npc_key} | {dlg.get('model_name', 'Stylizer')} "
                 f"| src={dlg.get('source')} | cache={dlg.get('cache_hit')}",
@@ -201,12 +207,16 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
             if force_act is not None:
                 force_act = max(0, min(4, int(force_act)))
             with st.lock:
-                enc = st.session.plan_next_encounter(
+                sess = st.session
+                prep = sess.prepare_encounter_spec(
                     focus_concept_id=focus_c,
                     force_action=force_act,
                     persona_key=persona_key,
                 )
-                snap = st.session.get_status_snapshot()
+            llm_bundle = sess.generate_encounter_llm_bundle(prep)
+            with st.lock:
+                enc = sess.finalize_encounter(prep, llm_bundle)
+                snap = sess.get_status_snapshot()
             lm = enc.get('llm_meta') or {}
             llm_tag = f" | LLM={lm.get('reasoner_model','Bank')}+{lm.get('stylizer_model','Tmpl')} (hit={lm.get('cache_hit')})"
             print(
@@ -298,7 +308,11 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
                 self._send_json({'error': 'Question cannot be empty'}, status=400)
                 return
             with st.lock:
-                res = st.session.chat_with_npc(npc_key=npc_key, student_question=student_q)
+                sess = st.session
+                ctx = sess.prepare_npc_chat_ctx(npc_key=npc_key, student_question=student_q)
+            res = sess.run_npc_chat_from_ctx(ctx)
+            with st.lock:
+                sess.record_npc_chat_turn(ctx['npc_key'], ctx['question'], res['reply'])
             print(
                 f"  [NPC CHAT] {npc_key} ({res.get('model_name')}) | Q={student_q[:45]!r} "
                 f"| R={res.get('reasoner_ms',0):.0f}ms + S={res.get('latency_ms',0):.0f}ms",

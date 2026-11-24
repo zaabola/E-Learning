@@ -21,6 +21,7 @@ Responsibilities:
     WITHOUT ever altering the verified academic question, choices, or answer.
 """
 
+import contextlib
 import json
 import os
 import random
@@ -193,6 +194,79 @@ def _clip_gba_line(text: str, limit: int = 136) -> str:
     return s[: limit - 3].rstrip(" ,;:-") + "..."
 
 
+def _detect_user_language(text: str, default_lang: str = "English") -> str:
+    """
+    Detects the language of the player's own chat message strictly (independent
+    of `course_title`), so asking in English NEVER forces a French reply.
+    """
+    s = str(text or "").strip()
+    low = s.lower()
+    if re.search(r"\b(in english|speak english|english please|en anglais)\b", low):
+        return "English"
+    if re.search(r"\b(in french|speak french|en français|en francais|parle français|parle francais)\b", low):
+        return "French"
+    if re.search(r"[éèêëàâçùûîïôœ]", s, re.IGNORECASE):
+        return "French"
+    fr_hits = len(
+        re.findall(
+            r"\b(bonjour|salut|quoi|qoui|pourquoi|comment|quel|quelle|quels|cours|aujourd|explique|aide|moi|merci|oui|non|est-ce|c'est|les|des|une|dans|pour|avec|mon|ton|sur)\b",
+            low,
+        )
+    )
+    en_hits = len(
+        re.findall(
+            r"\b(hi|hello|hey|bro|what|why|how|can|you|speak|english|explain|help|me|today|course|about|tell|give|hint|weakest|topic|please|thanks|yes|no|the|this|that|is|are)\b",
+            low,
+        )
+    )
+    if fr_hits > en_hits:
+        return "French"
+    if en_hits > fr_hits:
+        return "English"
+    return default_lang
+
+
+def _repair_and_parse_json(raw: str) -> dict:
+    """
+    Extracts JSON from LLM output and repairs minor truncation (unclosed quote,
+    trailing comma, or unclosed braces/brackets) if hit near `max_new_tokens`.
+    """
+    try:
+        return extract_strict_json(raw)
+    except Exception:
+        s = str(raw or "").strip()
+        s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s*```$", "", s)
+        start = s.find("{")
+        if start == -1:
+            raise
+        frag = s[start:]
+        in_str = False
+        esc = False
+        stack = []
+        for ch in frag:
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            else:
+                if ch == '"':
+                    in_str = True
+                elif ch in "{[":
+                    stack.append("}" if ch == "{" else "]")
+                elif ch in "}]" and stack and stack[-1] == ch:
+                    stack.pop()
+        if in_str:
+            frag += '"'
+        frag = re.sub(r",\s*$", "", frag)
+        frag += "".join(reversed(stack))
+        frag = re.sub(r",\s*([}\]])", r"\1", frag)
+        return json.loads(frag)
+
+
 class PersonaStylizerLLM:
     """
     Model #7 wrapper (`NousResearch/Meta-Llama-3.1-8B-Instruct` + optional QLoRA adapter)
@@ -229,6 +303,16 @@ class PersonaStylizerLLM:
 
     def is_live(self) -> bool:
         return self.mode == "live" and self.model is not None and self.tokenizer is not None
+
+    def _base_model_ctx(self):
+        """
+        Temporarily disables the specialized battle-taunt QLoRA adapter for open-ended
+        humorous NPC chat & multi-line course storytelling, preserving full conversational
+        Meta-Llama-3.1-8B-Instruct reasoning and language switching with zero extra VRAM.
+        """
+        if self.qlora_active and self.model is not None and hasattr(self.model, "disable_adapter"):
+            return self.model.disable_adapter()
+        return contextlib.nullcontext()
 
     def load_live(self):
         if self.model is not None or self.mode != "live":
@@ -387,7 +471,7 @@ class PersonaStylizerLLM:
             with torch.no_grad():
                 out_ids = self.model.generate(
                     **inputs,
-                    max_new_tokens=160,
+                    max_new_tokens=230,
                     do_sample=True,
                     temperature=0.72,
                     top_p=0.90,
@@ -397,7 +481,7 @@ class PersonaStylizerLLM:
             gen_ids = out_ids[0][inputs["input_ids"].shape[1] :]
             raw_text = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
             latency_ms = (time.perf_counter() - t0) * 1000.0
-            parsed = extract_strict_json(raw_text)
+            parsed = _repair_and_parse_json(raw_text)
 
             out = {
                 "speaker": profile["speaker"],
@@ -651,20 +735,21 @@ class PersonaStylizerLLM:
             )
             first_dev = next(self.model.parameters()).device
             inputs = self.tokenizer(prompt_str, return_tensors="pt").to(first_dev)
-            with torch.no_grad():
-                out_ids = self.model.generate(
-                    **inputs,
-                    max_new_tokens=360,
-                    do_sample=True,
-                    temperature=0.78,
-                    top_p=0.92,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                )
+            with self._base_model_ctx():
+                with torch.no_grad():
+                    out_ids = self.model.generate(
+                        **inputs,
+                        max_new_tokens=680,
+                        do_sample=True,
+                        temperature=0.78,
+                        top_p=0.92,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id,
+                    )
             gen_ids = out_ids[0][inputs["input_ids"].shape[1] :]
             raw_text = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
             latency_ms = (time.perf_counter() - t0) * 1000.0
-            parsed = extract_strict_json(raw_text)
+            parsed = _repair_and_parse_json(raw_text)
 
             q_title = _clip_gba_line(parsed.get("quest_title") or fb["quest_title"], 64)
             raw_intro = parsed.get("story_intro")
@@ -706,29 +791,60 @@ class PersonaStylizerLLM:
         self,
         npc_key: str,
         student_question: str,
-        verified_fact: str,
-        course_title: str,
-        matched_concept: str,
-        overall_mastery: float,
+        verified_fact: str = "",
+        course_title: str = "",
+        matched_concept: str = "",
+        overall_mastery: float = 0.5,
         chat_history: list = None,
         language: str = None,
+        concepts: list = None,
+        mastery_vec: list = None,
     ) -> dict:
         """
-        Interactive Overworld NPC Q&A powered by Model #7 (`Llama-3.1-8B QLoRA`)
-        grounded in Model #6's verified course fact. Answers the student's free-form
-        question with genuine RPG humor, warmth/sarcasm, and zero hallucination!
+        Interactive Overworld NPC Q&A powered by base `Meta-Llama-3.1-8B-Instruct`
+        (temporarily disabling the battle-JSON QLoRA adapter via `_base_model_ctx()`
+        so dialogue flows naturally in English OR French!) grounded strictly in the
+        active course's 5 concepts + DKT mastery.
         """
         pk = npc_key if npc_key in PERSONA_PROFILES else "villager"
         profile = PERSONA_PROFILES[pk]
         speaker = profile["speaker"]
-        lang = language or detect_course_language(f"{student_question} {verified_fact} {course_title}")
+        course_lang = detect_course_language(f"{course_title} {verified_fact}")
+        lang = language or _detect_user_language(student_question, default_lang=course_lang)
         m_pct = round(float(overall_mastery) * 100)
 
-        if lang == "French":
-            fb_reply = f"{speaker} : Bonne question ! Sur {matched_concept[:32]}, retiens surtout ceci : {verified_fact} (et avec {m_pct}% de maîtrise, tu es sur la bonne voie !)"
-        else:
-            fb_reply = f"{speaker}: Smart question! On {matched_concept[:32]}, the key thing is: {verified_fact} (at {m_pct}% mastery, you've totally got this!)"
+        # Build concise 5-concept cheat-sheet so NPC can summarize the whole course OR dive into any module
+        cheat_lines = []
+        for idx, c in enumerate((concepts or [])[:5]):
+            cid = int(c.get("concept_id", idx))
+            c_m = round(float(mastery_vec[cid]) * 100) if (mastery_vec and cid < len(mastery_vec)) else m_pct
+            c_title = str(c.get("title") or c.get("short_title") or f"Concept {cid}")
+            bullets = c.get("summary_bullets") or []
+            b0 = str(bullets[0] if bullets else (c.get("podcast_hint") or ""))[:115]
+            cheat_lines.append(f"- C{cid} ({c_m}% mastery): {c_title} — {b0}")
+        cheat_sheet = "\n".join(cheat_lines) if cheat_lines else (
+            f"- {matched_concept or course_title}: {verified_fact[:180]}"
+        )
 
+        # Casual vs course-inquiry detection for clean fallback messages
+        low_q = re.sub(r"[^a-z0-9à-ÿ\s]", " ", str(student_question or "").lower()).strip()
+        is_casual = bool(
+            re.fullmatch(r"(hi|hey|hello|yo|salut|bonjour|coucou|bro|bruh|ok|yes|no|oui|non|thanks|merci)( \w+){0,2}", low_q)
+            or re.search(r"\b(speak in english|speak english|en anglais|en français)\b", low_q)
+        )
+        topic_short = str(matched_concept or course_title or "this course")[:34]
+        if is_casual:
+            if lang == "French":
+                fb_reply = f"{speaker} : Hé ! Ça roule ! Pose-moi une question sur '{course_title[:28]}' et je t'aide à plier les dresseurs !"
+            else:
+                fb_reply = f"{speaker}: Hey there! Ask me anything about '{course_title[:28]}'—concepts, traps, or your weakest spot!"
+        else:
+            if lang == "French":
+                fb_reply = f"{speaker} : Sur {topic_short}, retiens surtout ceci : {verified_fact} (et à {m_pct}%, tu gères !)"
+            else:
+                fb_reply = f"{speaker}: On {topic_short}, here's the key: {verified_fact} (at {m_pct}% mastery, you've got this!)"
+
+        base_chat_name = f"{self._short_name(self.model_id, False)} (Chat)"
         if not self.is_live():
             return {
                 "npc": pk,
@@ -742,27 +858,23 @@ class PersonaStylizerLLM:
             }
 
         sys_msg = (
-            f"You are {speaker} in the retro-GBA E-Learning RPG KnowledgeQuest. "
-            f"Personality: {profile['archetype']}. "
-            f"Answer the player's question in {lang} in 2-3 punchy, genuinely FUNNY and helpful sentences "
-            f"(max 280 characters total, no markdown, no bullet lists). "
-            f"You MUST accurately include the Verified Course Fact below (zero hallucination!) while keeping "
-            f"your hilarious in-character RPG humor so the player learns AND smiles!"
+            f"You are {speaker} in the retro-GBA E-Learning RPG KnowledgeQuest.\n"
+            f"Personality: {profile['archetype']}.\n"
+            f"Active Course: {course_title} (Player Overall DKT Mastery: {m_pct}%).\n"
+            f"Course Cheat-Sheet (use ONLY these verified facts if asked about course content):\n{cheat_sheet}\n\n"
+            f"Strict Conversation Rules:\n"
+            f"1. Reply STRICTLY in {lang} (if the player speaks English or asks for English, answer in English even if the notes are in French!).\n"
+            f"2. Reply in 2-3 punchy, genuinely FUNNY, conversational sentences (max 280 chars total). NO markdown, NO bullet lists, NO JSON braces.\n"
+            f"3. Match the player's actual message! If they just say hi / casual banter, joke back in character and invite a question about the course (do NOT dump random definitions). "
+            f"If they ask about today's course, a concept, or what to study next, explain it clearly and hilariously from the Cheat-Sheet above."
         )
         hist_msgs = [{"role": "system", "content": sys_msg}]
-        for turn in (chat_history or [])[-4:]:
+        for turn in (chat_history or [])[-6:]:
             r = turn.get("role")
             c = str(turn.get("content") or "").strip()
             if r in ("user", "assistant") and c:
-                hist_msgs.append({"role": r, "content": c[:240]})
-
-        user_prompt = (
-            f"Course: {course_title} | Matched Topic: {matched_concept} | Player Overall Mastery: {m_pct}%\n"
-            f"Verified Course Fact (MUST stay accurate): {verified_fact}\n"
-            f"Player asks you: {student_question}\n"
-            f"Reply directly as {speaker} in {lang} with humor + clear help:"
-        )
-        hist_msgs.append({"role": "user", "content": user_prompt})
+                hist_msgs.append({"role": r, "content": c[:260]})
+        hist_msgs.append({"role": "user", "content": str(student_question or "").strip()})
 
         t0 = time.perf_counter()
         try:
@@ -771,24 +883,24 @@ class PersonaStylizerLLM:
             )
             first_dev = next(self.model.parameters()).device
             inputs = self.tokenizer(prompt_str, return_tensors="pt").to(first_dev)
-            with torch.no_grad():
-                out_ids = self.model.generate(
-                    **inputs,
-                    max_new_tokens=130,
-                    do_sample=True,
-                    temperature=0.76,
-                    top_p=0.92,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                )
+            with self._base_model_ctx():
+                with torch.no_grad():
+                    out_ids = self.model.generate(
+                        **inputs,
+                        max_new_tokens=150,
+                        do_sample=True,
+                        temperature=0.75,
+                        top_p=0.92,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id,
+                    )
             gen_ids = out_ids[0][inputs["input_ids"].shape[1] :]
             raw_reply = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
             latency_ms = (time.perf_counter() - t0) * 1000.0
             clean_reply = re.sub(r"\s+", " ", raw_reply).strip().strip('"')
-            # Strip accidental JSON wrapper if QLoRA adapter emits {"reply": "..."}
             if clean_reply.startswith("{") and "}" in clean_reply:
                 try:
-                    obj = extract_strict_json(clean_reply)
+                    obj = _repair_and_parse_json(clean_reply)
                     if isinstance(obj, dict):
                         vals = [v for v in obj.values() if isinstance(v, str) and len(v) > 8]
                         if vals:
@@ -807,8 +919,8 @@ class PersonaStylizerLLM:
                 "reply": clean_reply[:340],
                 "verified_fact": verified_fact,
                 "matched_concept": matched_concept,
-                "source": "live_qlora" if self.qlora_active else "live_llm",
-                "model_name": self.short_name,
+                "source": "live_llm",
+                "model_name": base_chat_name,
                 "latency_ms": round(latency_ms, 1),
             }
         except Exception as exc:
@@ -821,7 +933,7 @@ class PersonaStylizerLLM:
                 "verified_fact": verified_fact,
                 "matched_concept": matched_concept,
                 "source": "persona_template_fallback",
-                "model_name": f"{self.short_name} (Fallback)",
+                "model_name": f"{base_chat_name} (Fallback)",
                 "latency_ms": round(latency_ms, 1),
             }
         finally:

@@ -143,12 +143,21 @@ async function enterWorld(isNew, uploadedCourse = null) {
     Game.mode = 'overworld';
     await UI.fadeIn(350);
     if (isNew) {
-      await UI.sayLines([
-        'Morning light spills through your bedroom window in WILLOWBROOK...',
-        `Today your adaptive learning adventure on "${courseTitle}" begins at Professor ADA's Lab!`,
-        'Press ENTER -> DINO LAB to inspect the extracted photos from your course, or JOURNAL for Study Notes!',
-        '(ARROWS/WASD: move   Z: talk/confirm   X: back   ENTER: menu   M: sound)',
-      ]);
+      const story = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
+      if (story && Array.isArray(story.story_intro) && story.story_intro.length) {
+        const lines = [];
+        if (story.quest_title) lines.push(`QUEST: ${story.quest_title}`);
+        lines.push(...story.story_intro);
+        lines.push('(ARROWS/WASD: move   Z: talk/confirm   X: back   ENTER: menu   M: sound)');
+        await UI.sayLines(lines);
+      } else {
+        await UI.sayLines([
+          'Morning light spills through your bedroom window in WILLOWBROOK...',
+          `Today your adaptive learning adventure on "${courseTitle}" begins at Professor ADA's Lab!`,
+          'Press ENTER -> DINO LAB to inspect the extracted photos from your course, or JOURNAL for Study Notes!',
+          '(ARROWS/WASD: move   Z: talk/confirm   X: back   ENTER: menu   M: sound)',
+        ]);
+      }
     }
   } finally {
     Game.busy = false;

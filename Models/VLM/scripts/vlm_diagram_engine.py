@@ -1012,7 +1012,6 @@ class QwenVLDiagramEngine:
             out.append(occs[0] if occs else None)
         return out
 
-    @torch.inference_mode()
     def qwen_infer(
         self,
         image: Image.Image,
@@ -1022,10 +1021,11 @@ class QwenVLDiagramEngine:
     ):
         """
         Clean, uncontaminated Qwen-VL inference path:
-          - Uses the official processor and `apply_chat_template` WITHOUT mutating
-            `image_processor` attributes at runtime.
+          - Uses the official processor (`apply_chat_template(tokenize=False)` +
+            `processor(text=..., images=[rgb_img])`) so `pixel_values` and
+            `image_grid_thw` are always populated without mutating `image_processor`.
+          - Uses `torch.no_grad()` (compatible with `bitsandbytes` 4-bit state updates).
           - Runs directly on the native high-resolution RGB image.
-          - Performs a one-time finite-logit check on first call to confirm FP16 stability.
         Returns `(decoded_text, inputs_dict)`.
         """
         self.load_live_vlm()
@@ -1043,48 +1043,37 @@ class QwenVLDiagramEngine:
             }
         )
 
-        try:
-            inputs = self.vlm_processor.apply_chat_template(
-                messages,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_dict=True,
-                return_tensors="pt",
-            )
-        except TypeError:
-            text_input = self.vlm_processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            inputs = self.vlm_processor(
-                text=[text_input],
-                images=[rgb_img],
-                padding=True,
-                return_tensors="pt",
-            )
-
+        text_input = self.vlm_processor.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        inputs = self.vlm_processor(
+            text=[text_input],
+            images=[rgb_img],
+            padding=True,
+            return_tensors="pt",
+        )
         inputs.pop("token_type_ids", None)
         inputs = inputs.to(self.vlm_model.device)
 
-        if not getattr(self, "_checked_logits_finite", False):
-            self._checked_logits_finite = True
-            try:
-                thw = inputs["image_grid_thw"].detach().cpu().tolist() if "image_grid_thw" in inputs else None
-                probe = self.vlm_model(**inputs, use_cache=False)
-                finite_ok = bool(torch.isfinite(probe.logits).all().item())
-                print(
-                    f"  [VLM DIAGNOSTIC] native_img={rgb_img.size} | vision_grid={thw} | all_logits_finite={finite_ok}",
-                    flush=True,
-                )
-            except Exception as diag_exc:
-                print(f"  [VLM DIAGNOSTIC] finite probe skipped: {diag_exc}", flush=True)
+        if not getattr(self, "_logged_vision_grid", False):
+            self._logged_vision_grid = True
+            thw = inputs["image_grid_thw"].detach().cpu().tolist() if "image_grid_thw" in inputs else None
+            print(
+                f"  [VLM DIAGNOSTIC] native_img={rgb_img.size} | vision_grid={thw}",
+                flush=True,
+            )
 
-        generated_ids = self.vlm_model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-        )
-        in_len = inputs["input_ids"].shape[1]
-        trimmed = generated_ids[:, in_len:]
+        with torch.no_grad():
+            generated_ids = self.vlm_model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+            )
+        trimmed = [
+            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
+        ]
         decoded = self.vlm_processor.batch_decode(
             trimmed,
             skip_special_tokens=True,

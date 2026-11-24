@@ -235,7 +235,6 @@ class GroundingDINODiagramEvaluator:
         raw_scores = [float(s) for s in results["scores"].detach().cpu().tolist()]
         return raw_boxes, raw_scores, latency_ms
 
-    @torch.inference_mode()
     def generate_shape_candidates(
         self,
         img: Image.Image,
@@ -249,7 +248,7 @@ class GroundingDINODiagramEvaluator:
             (boxes, cylinders, ovals, clouds, table rows/cells — zero French text burden!).
           - Preserves nested boxes (e.g. `Cache de tampons` inside `Mémoire SGA`) by only
             deduplicating near-identical boxes (`IoU >= 0.82`) and dropping giant outer
-            page frames (`area > 88%` of image).
+            page frames (`area > 62%` of image).
           - Returns candidates sorted in clean reading order `(top-to-bottom, left-to-right)`
             with 1-based `"id"`.
         """
@@ -263,7 +262,8 @@ class GroundingDINODiagramEvaluator:
                 text=[list(self.SHAPE_PROMPTS)],
                 return_tensors="pt",
             ).to(self.device)
-            outputs = self.model(**inputs)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
             res = self.processor.post_process_grounded_object_detection(
                 outputs=outputs,
                 threshold=float(threshold),
@@ -276,7 +276,8 @@ class GroundingDINODiagramEvaluator:
                 text=joined,
                 return_tensors="pt",
             ).to(self.device)
-            outputs = self.model(**inputs)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
             res = self.processor.post_process_grounded_object_detection(
                 outputs,
                 inputs.input_ids,

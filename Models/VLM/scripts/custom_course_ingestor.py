@@ -714,7 +714,9 @@ def ingest_custom_course_package(
                     print(f"  [{vlm_name} FILTER] Rejected decorative/logo image on Page {cand['page']}.", flush=True)
                     continue
             except Exception as e:
+                import traceback
                 print(f"  [{vlm_name} LIVE] Error on Page {cand['page']}: {e}", flush=True)
+                traceback.print_exc()
 
         accepted_slots.append({"cand": cand, "vlm": vlm_res})
 

@@ -1401,6 +1401,10 @@ const UI = (() => {
                 : `Ingested "${titleVal}"! Launching Lab Monitor...`);
               if (unsub) { unsub(); unsub = null; }
               scr.remove();
+              const newStory = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
+              if (newStory && Array.isArray(newStory.story_intro) && newStory.story_intro.length) {
+                await sayLines(newStory.story_intro);
+              }
               await dinoDiagramScreen(0);
               resolve();
             } catch (err) {
@@ -1990,11 +1994,177 @@ const UI = (() => {
     });
   }
 
+  // ----- Interactive Stage 4 LLM Overworld NPC Q&A Chat Modal -----
+  function npcChatModal(opts = {}) {
+    return new Promise((resolve) => {
+      const npcKey = opts.npcKey || 'prof_ada';
+      const speaker = opts.speaker || String(npcKey).replace(/^tr_/, '').toUpperCase();
+      const st = (typeof AITutor !== 'undefined' && AITutor.getStatus) ? AITutor.getStatus() : {};
+      const story = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
+      const courseTitle = st.course_title || 'KnowledgeQuest';
+      const concepts = Array.isArray(st.concepts) ? st.concepts : [];
+      const isFr = (story && story.language === 'French')
+        || /[éèêëàâçùûîïôœ]/i.test(courseTitle + ' ' + ((concepts[0] && concepts[0].title) || ''));
+      const greeting = opts.greeting
+        || (story && story.npc_greetings && story.npc_greetings[npcKey])
+        || (isFr
+          ? `${speaker} : Pose-moi n'importe quelle question sur "${courseTitle}" !`
+          : `${speaker}: Ask me anything about "${courseTitle}" — I'll keep it sharp and funny!`);
+
+      const c0 = (concepts[0] && (concepts[0].short_title || concepts[0].title)) || courseTitle;
+      const cWeak = concepts.length
+        ? concepts.reduce((a, b) => ((a.mastery || 0) <= (b.mastery || 0) ? a : b))
+        : null;
+      const weakName = (cWeak && (cWeak.short_title || cWeak.title)) || c0;
+      const quickPrompts = isFr
+        ? [
+            `Explique-moi simplement : ${c0.slice(0, 26)}`,
+            `Quel est mon point faible et un indice sur ${weakName.slice(0, 22)} ?`,
+            `Donne-moi une astuce piège pour battre les dresseurs !`,
+          ]
+        : [
+            `Explain ${c0.slice(0, 28)} simply!`,
+            `What is my weakest topic (${weakName.slice(0, 22)}) and a key clue?`,
+            `Give me a sneaky tip to beat the upcoming trainers!`,
+          ];
+
+      const messages = [{ role: 'npc', text: greeting, meta: story && story.model_name ? story.model_name : 'Stage 4 LLM' }];
+      let busy = false;
+
+      const backdrop = document.createElement('div');
+      backdrop.className = 'ai-modal-backdrop';
+      const card = document.createElement('div');
+      card.className = 'ai-modal-card npc-chat-card';
+      backdrop.appendChild(card);
+      menuLayer.appendChild(backdrop);
+
+      function closeModal() {
+        window.removeEventListener('keydown', onKey, true);
+        backdrop.remove();
+        Input.clearPressed();
+        resolve();
+      }
+
+      function onKey(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          Sfx.cancel();
+          closeModal();
+        }
+      }
+
+      async function sendQuestion(rawQ) {
+        const q = String(rawQ || '').trim();
+        if (!q || busy) return;
+        busy = true;
+        messages.push({ role: 'user', text: q });
+        messages.push({ role: 'thinking', text: isFr ? `${speaker} réfléchit à une réponse futée...` : `${speaker} is cooking up a witty answer...` });
+        Sfx.select();
+        render();
+
+        let res = null;
+        if (typeof AITutor !== 'undefined' && AITutor.chatWithNpc) {
+          res = await AITutor.chatWithNpc(npcKey, q);
+        }
+        messages.pop(); // remove thinking placeholder
+        if (res && res.reply) {
+          const metaTag = res.model_name
+            ? `${res.model_name}${res.matched_concept ? ' · ' + res.matched_concept.slice(0, 24) : ''}`
+            : 'Stage 4 LLM';
+          messages.push({ role: 'npc', text: res.reply, meta: metaTag });
+          Sfx.statUp();
+        } else {
+          messages.push({
+            role: 'npc',
+            text: isFr ? `${speaker} : Mon signal labo grésille ! Réessaie dans une seconde.` : `${speaker}: My lab radio glitched! Ask me again in a second.`,
+            meta: 'Fallback',
+          });
+        }
+        busy = false;
+        render();
+      }
+
+      function render() {
+        const llmModels = st.models && st.models.llm ? st.models.llm : null;
+        const badgeTxt = (llmModels && llmModels.mode === 'live')
+          ? `${llmModels.reasoner.name} + ${llmModels.stylizer.name}`
+          : 'Stage 4 LLM NPC Tutor';
+
+        const logHtml = messages.map(m => {
+          if (m.role === 'user') {
+            return `<div class="npc-msg user"><span class="npc-msg-who">YOU</span><div>${escHtml(m.text)}</div></div>`;
+          }
+          if (m.role === 'thinking') {
+            return `<div class="npc-msg thinking">${escHtml(m.text)}</div>`;
+          }
+          return `<div class="npc-msg npc">
+            <div class="npc-msg-head"><span>${escHtml(speaker)}</span><span class="npc-msg-meta">${escHtml(m.meta || '')}</span></div>
+            <div>${escHtml(m.text)}</div>
+          </div>`;
+        }).join('');
+
+        const chipsHtml = quickPrompts.map((qp, idx) =>
+          `<button type="button" class="npc-chip-btn" data-qidx="${idx}" ${busy ? 'disabled' : ''}>${escHtml(qp)}</button>`
+        ).join('');
+
+        card.innerHTML = `
+          <div class="ai-top-bar">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="ai-dot ${(typeof AITutor !== 'undefined' && AITutor.isOnline()) ? '' : 'offline'}"></span>
+              <span class="ai-badge-rl">${escHtml(speaker)} &mdash; COURSE INTEL CHAT</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="ai-llm-chip">${escHtml(badgeTxt)}</span>
+              <button type="button" class="ai-btn-mini" id="npc-chat-close">CLOSE [ESC]</button>
+            </div>
+          </div>
+          <div class="npc-chat-log" id="npc-chat-log">${logHtml}</div>
+          <div class="npc-chips-row">${chipsHtml}</div>
+          <div class="npc-input-row">
+            <input type="text" id="npc-chat-input" class="npc-chat-input" placeholder="${isFr ? 'Pose ta question sur le cours / PDF...' : 'Ask anything about this course / PDF...'}" ${busy ? 'disabled' : ''} />
+            <button type="button" class="ai-btn-primary" id="npc-chat-send" ${busy ? 'disabled' : ''}>${isFr ? 'ENVOYER' : 'ASK'} &rarr;</button>
+          </div>
+        `;
+
+        const logEl = card.querySelector('#npc-chat-log');
+        if (logEl) logEl.scrollTop = logEl.scrollHeight;
+
+        const closeBtn = card.querySelector('#npc-chat-close');
+        if (closeBtn) closeBtn.onclick = () => { Sfx.cancel(); closeModal(); };
+
+        const inp = card.querySelector('#npc-chat-input');
+        const sendBtn = card.querySelector('#npc-chat-send');
+        if (sendBtn && inp) {
+          sendBtn.onclick = () => sendQuestion(inp.value);
+          inp.onkeydown = (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.stopPropagation();
+              sendQuestion(inp.value);
+            }
+          };
+          if (!busy) setTimeout(() => inp.focus(), 20);
+        }
+
+        card.querySelectorAll('.npc-chip-btn').forEach(btn => {
+          btn.onclick = () => {
+            const idx = parseInt(btn.dataset.qidx, 10);
+            sendQuestion(quickPrompts[idx]);
+          };
+        });
+      }
+
+      window.addEventListener('keydown', onKey, true);
+      render();
+    });
+  }
+
   return {
     init, say, sayLines, setPrompt, hideDialog, choose, yesNo, toast,
     fadeOut, fadeIn, flashScreen,
     setBox, setStatusChip, setEnemyBalls, hideBoxes, setBattleAiPill, animateHp, animateExp,
     moveMenu, partyScreen, bagScreen, shopScreen, starterChoice,
-    saveModal, importModal, askEncounterModal, questScreen, dinoDiagramScreen, titleCourseMenu,
+    saveModal, importModal, askEncounterModal, npcChatModal, questScreen, dinoDiagramScreen, titleCourseMenu,
   };
 })();

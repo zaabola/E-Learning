@@ -205,6 +205,21 @@ const Overworld = (() => {
     if (ch === 'b') { await UI.say('Field guides, maps, and research notebooks on learning algorithms.'); return; }
   }
 
+  function getStoryGreeting(npcKey, fallbackText) {
+    const story = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
+    if (story && story.npc_greetings && story.npc_greetings[npcKey]) {
+      return story.npc_greetings[npcKey];
+    }
+    return fallbackText;
+  }
+
+  async function askNpcChoice(prompt, options) {
+    if (prompt) await UI.say(prompt, { noWait: true, keep: true });
+    const idx = await UI.choose(options, { style: { right: '14px', bottom: '126px' } });
+    UI.hideDialog();
+    return idx;
+  }
+
   async function talkTo(npc) {
     // face the player
     npc.facing = OPPOSITE[Game.player.facing];
@@ -213,25 +228,41 @@ const Overworld = (() => {
     if (npc.special === 'prof') return profFlow();
     if (npc.special === 'parent') return parentFlow();
     if (npc.trainer) return trainerFlow(npc);
-    await UI.sayLines(npc.dialog);
+    const greet = getStoryGreeting('villager', (npc.dialog && npc.dialog[0]) || 'TOWNIE: Lovely day for studying!');
+    await UI.say(greet);
+    if (UI.npcChatModal) {
+      const pick = await askNpcChoice('Chat with this townie about your course?', ['ASK ABOUT COURSE', 'BYE']);
+      if (pick === 0) {
+        await UI.npcChatModal({ npcKey: 'villager', speaker: 'TOWNIE', greeting: greet });
+      }
+    }
   }
 
   async function parentFlow() {
     const f = Game.player.flags;
+    const momGreet = getStoryGreeting('mom', 'MOM: Up already? Today is the day your KnowledgeQuest research begins!');
     if (!f.sent_off) {
-      await UI.sayLines([
-        "MOM: Up already? Today is the day your KnowledgeQuest research begins!",
-        'MOM: Professor ADA sent word from the laboratory. She mentioned an expedition to investigate anomalies in the Knowledge Network.',
-        'MOM: I packed your bag. There is a POTION in the side pocket, so keep it handy.',
-        'MOM: Off you go, sweetheart. Remember — true learning is about exploring and testing ideas!',
-      ]);
+      const story = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
+      const lines = [momGreet];
+      if (story && Array.isArray(story.story_intro) && story.story_intro.length) {
+        lines.push(story.story_intro[0]);
+      } else {
+        lines.push('MOM: Professor ADA sent word from the laboratory. She needs your help restoring the Knowledge Network.');
+      }
+      lines.push('MOM: I packed a POTION in your bag — and remember, you can ask anyone in town questions about your course!');
+      await UI.sayLines(lines);
       Game.player.bag.potion = (Game.player.bag.potion || 0) + 1;
       UI.toast('Got a Potion!');
       f.sent_off = true;
       return;
     }
-    const ok = await UI.yesNo('MOM: You look worn out, sweetheart.\nWant to rest a moment?');
-    if (!ok) { await UI.say('MOM: Take care out there. Dinner is whenever you come home.'); return; }
+    await UI.say(momGreet);
+    const pick = await askNpcChoice('MOM: What do you need, sweetheart?', ['REST & HEAL', 'ASK ABOUT COURSE', 'BYE']);
+    if (pick === 1 && UI.npcChatModal) {
+      await UI.npcChatModal({ npcKey: 'mom', speaker: 'MOM', greeting: momGreet });
+      return;
+    }
+    if (pick !== 0) { await UI.say('MOM: Take care out there. Dinner is whenever you come home.'); return; }
     await UI.fadeOut(300);
     Sfx.heal();
     for (const c of Game.player.party) {
@@ -247,9 +278,14 @@ const Overworld = (() => {
   }
 
   async function nurseFlow() {
-    await UI.say('NURSE: Welcome to the POKEMON CENTER.');
-    const ok = await UI.yesNo('NURSE: Shall I restore your team\nto full health?');
-    if (!ok) { await UI.say('NURSE: Of course. We are here whenever you need us.'); return; }
+    const greet = getStoryGreeting('nurse', 'NURSE: Welcome to the POKEMON CENTER.');
+    await UI.say(greet);
+    const pick = await askNpcChoice('NURSE: How can I help today?', ['HEAL TEAM', 'ASK ABOUT COURSE', 'BYE']);
+    if (pick === 1 && UI.npcChatModal) {
+      await UI.npcChatModal({ npcKey: 'nurse', speaker: 'NURSE', greeting: greet });
+      return;
+    }
+    if (pick !== 0) { await UI.say('NURSE: Of course. We are here whenever you need us.'); return; }
     await UI.fadeOut(250);
     Sfx.heal();
     for (const c of Game.player.party) {
@@ -268,37 +304,70 @@ const Overworld = (() => {
   }
 
   async function shopFlow() {
-    await UI.sayLines([
-      'CLERK: Welcome to the POKE MART, trainer!',
-      'CLERK: Potions for the bruises, balls for the catching. Have a browse.',
-    ]);
+    const greet = getStoryGreeting('clerk', 'CLERK: Welcome to the POKE MART, trainer! Potions for bruises, study tips on the house!');
+    await UI.say(greet);
+    const pick = await askNpcChoice('CLERK: What catches your eye?', ['BROWSE SHOP', 'ASK ABOUT COURSE', 'BYE']);
+    if (pick === 1 && UI.npcChatModal) {
+      await UI.npcChatModal({ npcKey: 'clerk', speaker: 'CLERK', greeting: greet });
+      return;
+    }
+    if (pick !== 0) { await UI.say('CLERK: Safe roads out there. Mind the tall grass!'); return; }
     await UI.shopScreen();
     await UI.say('CLERK: Safe roads out there. Mind the tall grass!');
   }
 
   async function profFlow() {
     const f = Game.player.flags;
+    const story = (typeof AITutor !== 'undefined' && AITutor.getCourseStory) ? AITutor.getCourseStory() : null;
     if (!f.starter) {
-      await UI.sayLines([
-        "ADA: Ah, welcome! I am Professor ADA of the Willowbrook Vision Lab.",
-        'ADA: Our regional observation sensors lost calibration! To restore them, cadet researchers master five Computer Vision pillars: CNN Feature Pyramids, IoU & NMS, real-time YOLO detection, CRNN-CTC OCR, and full Vision Pipelines.',
-        'ADA: In battle, our 3-Model AI Tutor adapts to your mastery in real time — and you can open ENTER -> JOURNAL anytime to review Study Notes or listen to 15-second Podcast Hints!',
-        'ADA: Choose a companion from those three consoles: BULBASAUR, CHARMANDER, or SQUIRTLE.',
-      ]);
+      if (story && Array.isArray(story.story_intro) && story.story_intro.length) {
+        await UI.sayLines([
+          ...story.story_intro,
+          'ADA: Choose a research companion from those three consoles: BULBASAUR, CHARMANDER, or SQUIRTLE!',
+        ]);
+      } else {
+        await UI.sayLines([
+          "ADA: Ah, welcome! I am Professor ADA of the Willowbrook Research Lab.",
+          'ADA: Talk to anyone in town to ask questions about your course, and battle trainers to level up your DKT Mastery!',
+          'ADA: Choose a companion from those three consoles: BULBASAUR, CHARMANDER, or SQUIRTLE.',
+        ]);
+      }
+      if (UI.npcChatModal) {
+        const askNow = await askNpcChoice('ADA: Ready to start, or want to ask about the course?', ['PICK STARTER', 'ASK ADA']);
+        if (askNow === 1) {
+          await UI.npcChatModal({
+            npcKey: 'prof_ada',
+            speaker: 'PROF. ADA',
+            greeting: getStoryGreeting('prof_ada', 'ADA: Ask me anything about this course!'),
+          });
+        }
+      }
     } else {
       const partnerName = creatureName(Game.player.party[0]);
+      let adaLines = null;
       if (typeof AITutor !== 'undefined' && AITutor.isOnline() && AITutor.getNpcDialogue) {
         const dlg = await AITutor.getNpcDialogue('prof_ada', partnerName);
         if (dlg && Array.isArray(dlg.lines) && dlg.lines.length) {
-          await UI.sayLines(dlg.lines);
-          return;
+          adaLines = dlg.lines;
         }
       }
-      await UI.sayLines([
-        `ADA: How is ${partnerName}? Looking sharp!`,
-        'ADA: Head north along FERNWAY TRAIL toward STONEGATE GYM. Scout CAL tests IoU & NMS, MIRA tests YOLO, ROCCO tests OCR & CTC, and Leader MASON guards the End-to-End Vision Pipeline trial!',
-        'ADA: Remember: open ENTER -> JOURNAL whenever you want to read your YOLO & OCR Summary Notes or check your DKT Mastery.',
-      ]);
+      if (adaLines) {
+        await UI.sayLines(adaLines);
+      } else {
+        await UI.say(getStoryGreeting('prof_ada', `ADA: How is ${partnerName}? Looking sharp! Ask me anything about this course!`));
+      }
+      if (UI.npcChatModal) {
+        const pick = await askNpcChoice('ADA: How can I help with your research?', ['ASK ADA', 'LAB MONITOR', 'BYE']);
+        if (pick === 0) {
+          await UI.npcChatModal({
+            npcKey: 'prof_ada',
+            speaker: 'PROF. ADA',
+            greeting: (adaLines && adaLines[0]) || getStoryGreeting('prof_ada', 'ADA: Fire away with any course question!'),
+          });
+        } else if (pick === 1 && UI.dinoDiagramScreen) {
+          await UI.dinoDiagramScreen();
+        }
+      }
     }
   }
 
@@ -330,11 +399,15 @@ const Overworld = (() => {
     Game.player.bag.pokeball = (Game.player.bag.pokeball || 0) + 5;
     UI.toast('Got 5 Poke Balls!');
 
-    // The rival grabs the counter-pick and challenges immediately.
+    // The rival grabs the counter-pick and challenges immediately with course-aware LLM humor!
     const rivalId = RIVAL_COUNTER[id];
+    const rexGreet = getStoryGreeting(
+      'tr_rex',
+      `REX: Done analyzing? Then I'll choose ${SPECIES[rivalId].name}! Let's run a diagnostic battle right here!`
+    );
     await UI.sayLines([
-      `REX: Done analyzing? Then I'll choose ${SPECIES[rivalId].name}! It has the exact logical advantage over yours.`,
-      "REX: A true researcher tests hypotheses right away. Let's run a diagnostic battle right here, right now!",
+      rexGreet,
+      `REX: I picked ${SPECIES[rivalId].name} as your counter-pick. Let's test your course knowledge right now!`,
     ]);
     const tr = {
       flag: 'tr_rex', name: 'Rival REX',
@@ -350,14 +423,14 @@ const Overworld = (() => {
       ]);
       await UI.say('REX dashed out of the lab.');
       await UI.sayLines([
-        'ADA: Remarkable composure in your first trial! Rex\'s competitive drive will keep you sharp, but remember: learning is a collaborative journey, not just a sprint.',
-        'ADA: Rest up at home, consult your Field Journal, then head north up FERNWAY TRAIL toward STONEGATE ACADEMY.',
+        'ADA: Remarkable composure in your first trial! Rex\'s competitive drive will keep you sharp.',
+        'ADA: Talk to anyone in town to ask questions about your course, or head north up FERNWAY TRAIL toward STONEGATE GYM!',
       ]);
     } else if (result === 'lose') {
       await blackout();
       await UI.sayLines([
         'You hear REX analyzing his victory data outside the lab.',
-        'No matter. Review your battle data, train in the grass, and formulate a new strategy.',
+        'No matter. Review your battle data, ask Prof. ADA questions, and formulate a new strategy.',
       ]);
     }
   }
@@ -365,11 +438,28 @@ const Overworld = (() => {
   // ---------------- trainers ----------------
   async function trainerFlow(npc) {
     const tr = npc.trainer;
+    const trGreet = getStoryGreeting(tr.flag, (tr.intro && tr.intro[0]) || `${tr.name}: Ready to test your knowledge?`);
     if (Game.player.flags[tr.flag]) {
-      await UI.sayLines(tr.after);
+      await UI.say(trGreet);
+      if (UI.npcChatModal) {
+        const pick = await askNpcChoice(`${tr.name}: Want to discuss the course?`, ['ASK ABOUT COURSE', 'BYE']);
+        if (pick === 0) {
+          await UI.npcChatModal({ npcKey: tr.flag, speaker: tr.name.toUpperCase(), greeting: trGreet });
+        }
+      }
       return;
     }
-    await UI.sayLines(tr.intro);
+    await UI.say(trGreet);
+    if (UI.npcChatModal) {
+      const pick = await askNpcChoice(`${tr.name}: What's your move?`, ['BATTLE!', 'ASK ABOUT COURSE', 'NOT YET']);
+      if (pick === 1) {
+        await UI.npcChatModal({ npcKey: tr.flag, speaker: tr.name.toUpperCase(), greeting: trGreet });
+        const ready = await UI.yesNo(`${tr.name}: Got the info you needed? Ready to battle now?`);
+        if (!ready) return;
+      } else if (pick === 2 || pick < 0) {
+        return;
+      }
+    }
     const result = await Battle.start({ trainer: tr });
     if (result === 'win') {
       Game.player.flags[tr.flag] = true;

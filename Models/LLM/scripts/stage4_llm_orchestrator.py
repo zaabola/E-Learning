@@ -56,8 +56,9 @@ class Stage4LLMOrchestrator:
         # Key -> deque of pre-generated encounter dicts (Reasoner + Stylizer)
         self._enc_cache = collections.defaultdict(collections.deque)
         self._ada_cache = {}
+        self._story_cache = {}
         self._inflight = set()
-        self._prefetch_q = queue.Queue(maxsize=16)
+        self._prefetch_q = queue.Queue(maxsize=24)
 
         if self.mode == "live":
             self.reasoner.load_live()
@@ -109,6 +110,7 @@ class Stage4LLMOrchestrator:
         with self._cache_lock:
             self._enc_cache.clear()
             self._ada_cache.clear()
+            self._story_cache.clear()
 
     def _build_encounter_bundle(self, spec: dict) -> dict:
         """Runs Model #6 (Reasoner) -> Model #7 (Stylizer) sequentially under GPU lock."""
@@ -299,6 +301,110 @@ class Stage4LLMOrchestrator:
             with self._cache_lock:
                 self._inflight.discard(("ada", cache_key))
 
+    def get_or_generate_course_story(
+        self,
+        course_id: str,
+        course_title: str,
+        concepts: list,
+        allow_blocking: bool = True,
+    ) -> dict:
+        with self._cache_lock:
+            cached = self._story_cache.get(course_id)
+            if cached:
+                out = dict(cached)
+                out["cache_hit"] = True
+                return out
+
+        if (not self.stylizer.is_live()) or (not allow_blocking) or self._vlm_busy.is_set():
+            out = self.stylizer.generate_course_story(course_title=course_title, concepts=concepts) if not self.stylizer.is_live() else None
+            if out is None:
+                # Non-blocking template while live story generates in background
+                prev_mode = self.stylizer.mode
+                self.stylizer.mode = "fallback"
+                try:
+                    out = self.stylizer.generate_course_story(course_title=course_title, concepts=concepts)
+                finally:
+                    self.stylizer.mode = prev_mode
+            out["cache_hit"] = False
+            return out
+
+        with self._gpu_lock:
+            out = self.stylizer.generate_course_story(course_title=course_title, concepts=concepts)
+        with self._cache_lock:
+            self._story_cache[course_id] = out
+        out["cache_hit"] = False
+        return out
+
+    def schedule_course_story_prefetch(self, course_id: str, course_title: str, concepts: list):
+        if not self.stylizer.is_live():
+            return
+        with self._cache_lock:
+            if course_id in self._story_cache or ("story", course_id) in self._inflight:
+                return
+            self._inflight.add(("story", course_id))
+        try:
+            self._prefetch_q.put_nowait(("story", course_id, {"course_title": course_title, "concepts": concepts}))
+        except queue.Full:
+            with self._cache_lock:
+                self._inflight.discard(("story", course_id))
+
+    def chat_with_npc(
+        self,
+        npc_key: str,
+        student_question: str,
+        course_title: str,
+        concepts: list,
+        mastery_vec: list,
+        chat_history: list = None,
+    ) -> dict:
+        """
+        Live 2-LLM interactive NPC Q&A:
+          1. Model #6 (`DeepSeek-R1-7B`) extracts a verified factual answer strictly from the active course/PDF notes.
+          2. Model #7 (`Llama-3.1-8B QLoRA`) delivers that answer in the NPC's humorous retro-RPG voice!
+        """
+        overall_m = sum(float(x) for x in mastery_vec) / max(1, len(mastery_vec)) if mastery_vec else 0.5
+        if (not self.is_live()) or self._vlm_busy.is_set():
+            fact_res = self.reasoner.answer_course_question(
+                student_question=student_question,
+                course_title=course_title,
+                concepts=concepts,
+                mastery_vec=mastery_vec,
+            )
+            rep = self.stylizer.generate_npc_chat_reply(
+                npc_key=npc_key,
+                student_question=student_question,
+                verified_fact=fact_res["verified_fact"],
+                course_title=course_title,
+                matched_concept=fact_res["matched_concept"],
+                overall_mastery=overall_m,
+                chat_history=chat_history,
+                language=fact_res["language"],
+            )
+            rep["reasoner_source"] = fact_res["source"]
+            rep["reasoner_ms"] = fact_res["latency_ms"]
+            return rep
+
+        with self._gpu_lock:
+            fact_res = self.reasoner.answer_course_question(
+                student_question=student_question,
+                course_title=course_title,
+                concepts=concepts,
+                mastery_vec=mastery_vec,
+            )
+            rep = self.stylizer.generate_npc_chat_reply(
+                npc_key=npc_key,
+                student_question=student_question,
+                verified_fact=fact_res["verified_fact"],
+                course_title=course_title,
+                matched_concept=fact_res["matched_concept"],
+                overall_mastery=overall_m,
+                chat_history=chat_history,
+                language=fact_res["language"],
+            )
+        rep["reasoner_source"] = fact_res["source"]
+        rep["reasoner_ms"] = fact_res["latency_ms"]
+        return rep
+
     def _prefetch_loop(self):
         while True:
             kind, cache_key, spec = self._prefetch_q.get()
@@ -306,7 +412,19 @@ class Stage4LLMOrchestrator:
                 # Yield cleanly if PDF ingestion is currently using the GPUs
                 while self._vlm_busy.is_set():
                     time.sleep(0.5)
-                if kind == "enc":
+                if kind == "story":
+                    with self._gpu_lock:
+                        out = self.stylizer.generate_course_story(
+                            course_title=spec["course_title"],
+                            concepts=spec["concepts"],
+                        )
+                    with self._cache_lock:
+                        self._story_cache[cache_key] = out
+                    print(
+                        f"  [STAGE-4 PREFETCH] Course Story '{out['quest_title']}' ready ({out['model_name']} {out['latency_ms']:.0f}ms)",
+                        flush=True,
+                    )
+                elif kind == "enc":
                     bundle = self._build_encounter_bundle(spec)
                     with self._cache_lock:
                         q = self._enc_cache[cache_key]

@@ -833,6 +833,104 @@ body.touch #screen {
   line-height: 1.25;
 }
 
+.npc-chat-card {
+  display: flex;
+  flex-direction: column;
+  height: 416px;
+}
+.npc-chat-log {
+  flex: 1 1 0;
+  min-height: 140px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 8px;
+  background: #0d141f;
+  border: 1px solid #2b3c54;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.npc-msg {
+  font-family: var(--dialog-font);
+  font-size: 16px;
+  line-height: 1.3;
+  padding: 7px 10px;
+  border-radius: 6px;
+  max-width: 92%;
+}
+.npc-msg.npc {
+  align-self: flex-start;
+  background: #1a2438;
+  border-left: 3px solid #f4d878;
+  color: #eef5ff;
+}
+.npc-msg.user {
+  align-self: flex-end;
+  background: #1a3754;
+  border-right: 3px solid #58d0ff;
+  color: #dff4ff;
+}
+.npc-msg.thinking {
+  align-self: flex-start;
+  background: #1b2234;
+  color: #a8b8d4;
+  font-style: italic;
+}
+.npc-msg-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: #f4d878;
+  margin-bottom: 3px;
+}
+.npc-msg-meta {
+  color: #9ec0e8;
+}
+.npc-msg-who {
+  display: block;
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: #7ee0ff;
+  margin-bottom: 2px;
+}
+.npc-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.npc-chip-btn {
+  font-family: var(--dialog-font);
+  font-size: 13px;
+  color: #cfe4ff;
+  background: #1b2a40;
+  border: 1px solid #44658c;
+  border-radius: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.npc-chip-btn:hover { background: #294162; border-color: #70b0f8; }
+.npc-input-row {
+  display: flex;
+  gap: 7px;
+  margin-top: 7px;
+}
+.npc-chat-input {
+  flex: 1 1 auto;
+  font-family: var(--dialog-font);
+  font-size: 16px;
+  color: #ffffff;
+  background: #0d141f;
+  border: 1px solid #4a78b0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  outline: none;
+}
+.npc-chat-input:focus { border-color: #f4d878; }
+
 .ai-podcast-bar {
   margin-top: 7px;
   background: #1e2c3e;

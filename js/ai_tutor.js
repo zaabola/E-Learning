@@ -647,13 +647,13 @@ const AITutor = (() => {
           force_action: forceAction,
           persona_key: personaKey,
         }),
-      }, 28000);
+      }, 60000);
       online = true;
       statusCache = data.status;
       return data.encounter;
     } catch (e) {
-      online = false;
-      statusCache = buildOfflineStatus();
+      // Do NOT permanently flip `online = false` on one slow LLM timeout — only use offline fallback for this turn
+      if (!statusCache) statusCache = buildOfflineStatus();
       return buildOfflineEncounter(focusConceptId, forceAction);
     }
   }
@@ -662,7 +662,7 @@ const AITutor = (() => {
     if (!online) return null;
     try {
       const q = `/api/npc/dialogue?npc=${encodeURIComponent(npcKey)}&starter=${encodeURIComponent(starterName)}`;
-      const data = await apiFetch(q, { method: 'GET' }, 16000);
+      const data = await apiFetch(q, { method: 'GET' }, 30000);
       if (data && Array.isArray(data.lines) && data.lines.length > 0) {
         return data;
       }
@@ -670,6 +670,36 @@ const AITutor = (() => {
     } catch (e) {
       return null;
     }
+  }
+
+  async function chatWithNpc(npcKey = 'prof_ada', question = '') {
+    const cleanQ = String(question || '').trim();
+    if (!cleanQ) return null;
+    try {
+      const data = await apiFetch('/api/npc/chat', {
+        method: 'POST',
+        body: JSON.stringify({ npc_key: npcKey, question: cleanQ }),
+      }, 45000);
+      online = true;
+      return data;
+    } catch (e) {
+      const st = statusCache || buildOfflineStatus();
+      const cs = st.concepts || FALLBACK_CONCEPTS;
+      const c0 = cs[0] || FALLBACK_CONCEPTS[0];
+      const fact = (c0.summary_bullets && c0.summary_bullets[0]) || c0.podcast_hint || c0.title;
+      return {
+        npc: npcKey,
+        speaker: String(npcKey || 'NPC').replace(/^tr_/, '').toUpperCase(),
+        reply: `Quick study tip on ${c0.short_title || c0.title}: ${fact}`,
+        matched_concept: c0.title,
+        source: 'offline_fallback',
+        model_name: 'Offline Notes',
+      };
+    }
+  }
+
+  function getCourseStory() {
+    return (statusCache && statusCache.course_story) ? statusCache.course_story : null;
   }
 
   function gradeOffline(enc, userResponse, responseSec, hintUsed) {
@@ -1112,6 +1142,8 @@ const AITutor = (() => {
     nextEncounter,
     submitEncounter,
     getNpcDialogue,
+    chatWithNpc,
+    getCourseStory,
     getVisionPuzzles,
     submitVisionPuzzle,
     submitVisionVQA,

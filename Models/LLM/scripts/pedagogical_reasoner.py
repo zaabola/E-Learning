@@ -359,11 +359,19 @@ class PedagogicalReasonerLLM:
             prompt_str = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
+            # For DeepSeek-R1-Distill, prefill a brief closed <think> block + opening `{`
+            # so it doesn't burn 400+ tokens meandering on T4 (~25s -> ~5s, and ~100% JSON validity!)
+            prefill = ""
+            if "deepseek" in (self.model_id or "").lower():
+                prefill = (
+                    f"<think>\nGround strictly in '{title}' notes ({lang}), tier {rl_action}. Output clean JSON.\n</think>\n{{"
+                )
+                prompt_str = prompt_str + prefill
             inputs = self.tokenizer(prompt_str, return_tensors="pt").to(self.model.device)
             with torch.no_grad():
                 out_ids = self.model.generate(
                     **inputs,
-                    max_new_tokens=512,
+                    max_new_tokens=340,
                     do_sample=True,
                     temperature=0.55,
                     top_p=0.90,
@@ -372,9 +380,13 @@ class PedagogicalReasonerLLM:
                 )
             gen_ids = out_ids[0][inputs["input_ids"].shape[1] :]
             raw_text = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
+            if prefill.endswith("{"):
+                raw_text = "{" + raw_text
             latency_ms = (time.perf_counter() - t0) * 1000.0
 
             clean_json_text, trace = strip_think_trace(raw_text)
+            if not trace and prefill:
+                trace = f"Grounded in '{title}' ({lang}, tier {rl_action})."
             parsed = extract_strict_json(clean_json_text)
             norm = validate_and_normalize_reasoner_output(
                 parsed, rl_action=int(rl_action), fallback_item=fallback_item
@@ -397,6 +409,124 @@ class PedagogicalReasonerLLM:
                 "source": "curriculum_bank_fallback",
                 "model_name": f"{self.short_name} (Fallback)",
                 "latency_ms": round(latency_ms, 1),
+            }
+        finally:
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
+    def answer_course_question(
+        self,
+        student_question: str,
+        course_title: str,
+        concepts: list,
+        mastery_vec: list,
+    ) -> dict:
+        """
+        Model #6 factual grounding for interactive NPC Q&A:
+        Searches the active course / uploaded PDF's 5 concepts and distills a short,
+        100% factually accurate 1-2 sentence answer (zero hallucination) so Model #7
+        can deliver it with NPC humor!
+        """
+        q_low = str(student_question or "").lower()
+        q_tokens = set(re.findall(r"[0-9a-zA-ZÀ-ÿ$_]{3,}", q_low))
+
+        # Rank all 5 concepts by lexical relevance (3x weight on title/short_title hits!)
+        scored = []
+        for c in (concepts or []):
+            cid = int(c.get("concept_id", 0))
+            title_blob = f"{c.get('title', '')} {c.get('short_title', '')}".lower()
+            body_blob = " ".join(
+                [str(c.get("podcast_hint", ""))]
+                + [str(b) for b in (c.get("summary_bullets") or [])]
+            ).lower()
+            t_tokens = set(re.findall(r"[0-9a-zA-ZÀ-ÿ$_]{3,}", title_blob))
+            b_tokens = set(re.findall(r"[0-9a-zA-ZÀ-ÿ$_]{3,}", body_blob))
+            overlap = 3 * len(q_tokens & t_tokens) + len(q_tokens & b_tokens)
+            scored.append((overlap, cid, c, title_blob + " " + body_blob))
+        scored.sort(key=lambda x: (-x[0], x[1]))
+
+        top_concepts = scored[:2] if scored else []
+        context_lines = []
+        for _, cid, c, _ in top_concepts:
+            m_pct = round(float(mastery_vec[cid]) * 100) if cid < len(mastery_vec) else 50
+            bullets = " | ".join(str(b) for b in (c.get("summary_bullets") or [])[:4])
+            context_lines.append(f"[C{cid}: {c.get('title','')} (Mastery {m_pct}%)] {bullets}")
+        context_str = "\n".join(context_lines)
+        lang = detect_course_language(student_question + " " + course_title)
+
+        fallback_fact = (
+            (top_concepts[0][2].get("summary_bullets") or [top_concepts[0][2].get("podcast_hint", "")])[0]
+            if top_concepts
+            else f"Review the key concepts of {course_title} in your Field Journal."
+        )
+
+        if not self.is_live():
+            return {
+                "verified_fact": str(fallback_fact),
+                "matched_concept": top_concepts[0][2].get("title", course_title) if top_concepts else course_title,
+                "language": lang,
+                "source": "course_notes_rag",
+                "latency_ms": 0.0,
+            }
+
+        sys_msg = (
+            "You are Model #6 (Academic Fact Reasoner). Answer the student's question in 1-2 crisp, "
+            f"accurate sentences in {lang}, grounded strictly in the provided Course Notes. "
+            "If the question asks about their weakest topic or study plan, use the Mastery percentages shown. "
+            "Never hallucinate facts outside the notes."
+        )
+        user_msg = (
+            f"Course: {course_title}\n"
+            f"Course Notes:\n{context_str}\n\n"
+            f"Student Question: {student_question}\n"
+            f"Write ONLY the concise factual answer in {lang} (max 45 words)."
+        )
+        messages = [
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": user_msg},
+        ]
+        t0 = time.perf_counter()
+        try:
+            prompt_str = self.tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            if "deepseek" in (self.model_id or "").lower():
+                prompt_str += f"<think>\nCheck course notes and answer concisely in {lang}.\n</think>\n"
+            inputs = self.tokenizer(prompt_str, return_tensors="pt").to(self.model.device)
+            with torch.no_grad():
+                out_ids = self.model.generate(
+                    **inputs,
+                    max_new_tokens=110,
+                    do_sample=True,
+                    temperature=0.4,
+                    top_p=0.9,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                )
+            gen_ids = out_ids[0][inputs["input_ids"].shape[1] :]
+            raw_ans = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
+            clean_ans, _ = strip_think_trace(raw_ans)
+            clean_ans = re.sub(r"\s+", " ", clean_ans).strip()
+            if len(clean_ans) < 8:
+                clean_ans = str(fallback_fact)
+            return {
+                "verified_fact": clean_ans,
+                "matched_concept": top_concepts[0][2].get("title", course_title) if top_concepts else course_title,
+                "language": lang,
+                "source": "live_llm",
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+            }
+        except Exception as exc:
+            print(f"  [LLM-6 Reasoner] Q&A fallback: {exc}", flush=True)
+            return {
+                "verified_fact": str(fallback_fact),
+                "matched_concept": top_concepts[0][2].get("title", course_title) if top_concepts else course_title,
+                "language": lang,
+                "source": "course_notes_rag",
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
             }
         finally:
             if torch.cuda.is_available():

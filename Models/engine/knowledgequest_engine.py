@@ -235,6 +235,7 @@ class KnowledgeQuestAIEngine:
             course_meta=course_meta,
         )
         sess.prefetch_next_turns(persona_key='wild')
+        sess.prefetch_next_turns(persona_key='tr_rex')
         return sess
 
     def ingest_new_course(
@@ -264,7 +265,24 @@ class KnowledgeQuestAIEngine:
         finally:
             self.llm_orchestrator.clear_caches()
             self.llm_orchestrator.set_vlm_busy(False)
-        return self.create_session(profile=profile, course_id=pkg['course_id']), pkg
+
+        sess = self.create_session(profile=profile, course_id=pkg['course_id'])
+        # Generate the custom humorous RPG Storyline + NPC script strictly from the uploaded PDF!
+        if progress_cb:
+            try:
+                progress_cb(94, f"Stage 4 LLMs writing a custom RPG story & NPC dialogue for '{pkg['title']}'...")
+            except Exception:
+                pass
+        try:
+            sess.course_story = self.llm_orchestrator.get_or_generate_course_story(
+                course_id=sess.course_id,
+                course_title=sess.course_title,
+                concepts=sess.curriculum,
+                allow_blocking=True,
+            )
+        except Exception as story_exc:
+            print(f"  [STAGE-4 STORY WARN] {story_exc}", flush=True)
+        return sess, pkg
 
 
 class PlayerSession:
@@ -318,6 +336,8 @@ class PlayerSession:
         self.quest_completed = False
         self._variant_cursors = {}            # Per-(concept_id, tier) anti-repeat rotation
         self.asked_questions = []             # Recent questions passed to Model #6 Reasoner to prevent repeats
+        self.npc_chat_histories = {}          # Per-NPC multi-turn Q&A history for humorous overworld chat
+        self.course_story = None              # Live LLM-generated RPG story & NPC greetings for this course
 
         dkt = engine.dkt_model
         self.h_state = torch.zeros((dkt.num_layers, 1, dkt.hidden_dim), dtype=torch.float32)
@@ -578,10 +598,58 @@ class PlayerSession:
                 'persona_key': persona_key or 'wild',
                 'asked_history': list(self.asked_questions[-6:]),
             }
+            orch.schedule_course_story_prefetch(self.course_id, self.course_title, self.curriculum)
             orch.schedule_encounter_prefetch(spec)
             orch.schedule_prof_ada_prefetch(self._build_prof_ada_spec())
         except Exception:
             pass
+
+    def get_course_story(self, allow_blocking: bool = False) -> dict:
+        if self.course_story is not None and self.course_story.get('source', '').startswith('live'):
+            return self.course_story
+        orch = getattr(self.engine, 'llm_orchestrator', None)
+        if orch is not None:
+            story = orch.get_or_generate_course_story(
+                course_id=self.course_id,
+                course_title=self.course_title,
+                concepts=self.curriculum,
+                allow_blocking=allow_blocking,
+            )
+            if story.get('source', '').startswith('live') or self.course_story is None:
+                self.course_story = story
+            return self.course_story
+        return self.course_story or {}
+
+    def chat_with_npc(self, npc_key: str, student_question: str) -> dict:
+        pk = str(npc_key or 'prof_ada')
+        q_clean = str(student_question or '').strip()
+        hist = self.npc_chat_histories.setdefault(pk, [])
+        orch = getattr(self.engine, 'llm_orchestrator', None)
+        if orch is not None:
+            res = orch.chat_with_npc(
+                npc_key=pk,
+                student_question=q_clean,
+                course_title=self.course_title,
+                concepts=self.curriculum,
+                mastery_vec=[float(v) for v in self.mastery],
+                chat_history=hist,
+            )
+        else:
+            res = {
+                'npc': pk,
+                'speaker': pk.upper(),
+                'reply': f"{pk.upper()}: Check your Field Journal for notes on {self.course_title}!",
+                'verified_fact': '',
+                'matched_concept': self.course_title,
+                'source': 'fallback',
+                'model_name': 'Template',
+                'latency_ms': 0.0,
+            }
+        hist.append({'role': 'user', 'content': q_clean})
+        hist.append({'role': 'assistant', 'content': res['reply']})
+        if len(hist) > 8:
+            self.npc_chat_histories[pk] = hist[-8:]
+        return res
 
     def get_npc_dialogue(self, npc_key: str = 'prof_ada', starter_name: str = 'your partner') -> dict:
         """Generates live DKT-driven retro-GBA dialogue for Prof. ADA or an overworld trainer."""
@@ -1183,6 +1251,7 @@ class PlayerSession:
             'course_title': self.course_title,
             'course_subtitle': self.course_subtitle,
             'course_mentor': self.course_mentor,
+            'course_story': self.get_course_story(allow_blocking=False),
             'available_courses': list_available_courses(),
             'profile': self.profile,
             'turn': self.turn,

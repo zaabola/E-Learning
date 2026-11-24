@@ -71,7 +71,23 @@ PERSONA_PROFILES = {
     },
     "prof_ada": {
         "speaker": "ADA",
-        "archetype": "warm, encouraging, gently witty lead professor who translates DKT metrics into clear study strategy",
+        "archetype": "warm, encouraging, gently witty lead professor who cracks dry academic jokes and translates DKT metrics into clear study strategy",
+    },
+    "mom": {
+        "speaker": "MOM",
+        "archetype": "loving, hilariously overprotective RPG mom who compares tough university concepts to laundry, soup, and forgetting your jacket",
+    },
+    "villager": {
+        "speaker": "TOWNIE",
+        "archetype": "quirky, gossipy Willowbrook villager with deadpan RPG humor who overhears rumors about the course and drops sneaky study clues",
+    },
+    "nurse": {
+        "speaker": "NURSE",
+        "archetype": "cheerful, slightly sassy healing-center nurse who heals both tired creatures and fried student brains with witty medical puns",
+    },
+    "clerk": {
+        "speaker": "CLERK",
+        "archetype": "fast-talking Poke Mart merchant who pitches study facts like limited-time bargain deals",
     },
     "wild": {
         "speaker": "NARRATOR",
@@ -371,7 +387,7 @@ class PersonaStylizerLLM:
             with torch.no_grad():
                 out_ids = self.model.generate(
                     **inputs,
-                    max_new_tokens=200,
+                    max_new_tokens=160,
                     do_sample=True,
                     temperature=0.72,
                     top_p=0.90,
@@ -521,6 +537,289 @@ class PersonaStylizerLLM:
                 "npc": "prof_ada",
                 "speaker": "ADA",
                 "lines": fb_lines,
+                "source": "persona_template_fallback",
+                "model_name": f"{self.short_name} (Fallback)",
+                "latency_ms": round(latency_ms, 1),
+            }
+        finally:
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
+    def generate_course_story(
+        self,
+        course_title: str,
+        concepts: list,
+    ) -> dict:
+        """
+        Generates a complete, humorous, course-specific RPG storyline & overworld NPC
+        script whenever a course loads or a new PDF is uploaded!
+        Matches the PDF's language (French or English) and weaves all 5 concepts into
+        the town's plot and every NPC's personality.
+        """
+        titles = [str(c.get("short_title") or c.get("title") or f"Concept {i}") for i, c in enumerate(concepts[:5])]
+        while len(titles) < 5:
+            titles.append(course_title)
+        bullets_blob = " ".join(
+            str((c.get("summary_bullets") or [c.get("title", "")])[0]) for c in concepts[:5]
+        )
+        lang = detect_course_language(f"{course_title} {' '.join(titles)} {bullets_blob}")
+
+        if lang == "French":
+            fb = {
+                "language": "French",
+                "quest_title": f"L'Expédition : {course_title[:38]}",
+                "story_intro": [
+                    f"ALERTE LABO : Les archives de '{course_title[:36]}' ont disjoncté dans tout Willowbrook !",
+                    f"ADA : Les chercheurs CAL, MIRA, ROCCO et MASON gardent les secrets de {titles[0][:24]} jusqu'à {titles[4][:24]}.",
+                    "ADA : Parle aux habitants, pose-leur tes questions sur le cours, et bats les champions pour restaurer le réseau !",
+                ],
+                "npc_greetings": {
+                    "prof_ada": f"ADA : Mon café a refroidi en lisant '{course_title[:28]}'... Pose-moi n'importe quelle question sur le cours !",
+                    "mom": f"MAMAN : Tu révises '{course_title[:26]}' ? Prends ton pull et ne confonds pas {titles[0][:22]} avec la vaisselle !",
+                    "villager": f"HABITANT : Psst ! On raconte que MASON pose des pièges sur {titles[4][:24]}. Demande-moi un indice avant d'y aller !",
+                    "nurse": f"INFIRMIÈRE : Cerveau en surchauffe à cause de {titles[1][:24]} ? On soigne ton équipe et je peux résumer le cours !",
+                    "clerk": f"VENDEUR : Promo du jour : 1 Potion achetée = 1 astuce gratuite sur {titles[2][:24]} ! Pose ta question !",
+                    "tr_rex": f"REX : J'ai déjà mémorisé tout '{course_title[:24]}' pendant mon petit-déj. Tu veux des infos ou un vrai duel ?",
+                    "tr_cal": f"CAL : Salut ! Sur le sentier, je teste {titles[1][:26]} ! Tu veux un tuyau rapide ou tu lances le combat ?",
+                    "tr_mira": f"MIRA : Pas de blabla sur {titles[2][:26]}. Demande un éclaircissement si tu doutes, sinon prouve ta maîtrise !",
+                    "tr_rocco": f"ROCCO : {titles[3][:26]}, c'est du sérieux, gamin ! Pose tes questions avant ou affronte-moi direct !",
+                    "tr_mason": f"MASON : Ici repose l'épreuve ultime de {titles[4][:26]}. Interroge-moi pour te préparer, ou défie le roc !",
+                },
+                "source": "story_template",
+                "model_name": f"{self.short_name} (Fallback)",
+                "latency_ms": 0.0,
+            }
+        else:
+            fb = {
+                "language": "English",
+                "quest_title": f"The {course_title[:36]} Chronicle",
+                "story_intro": [
+                    f"LAB ALERT: Willowbrook's '{course_title[:34]}' knowledge grid just scrambled itself into chaos!",
+                    f"ADA: Scouts CAL, MIRA, ROCCO, and Boss MASON guard the pillars from {titles[0][:22]} to {titles[4][:22]}.",
+                    "ADA: Chat with any villager or trainer to quiz them for clues, then battle your way to full mastery!",
+                ],
+                "npc_greetings": {
+                    "prof_ada": f"ADA: My coffee went cold decoding '{course_title[:26]}'—ask me anything about this course!",
+                    "mom": f"MOM: Studying '{course_title[:26]}' already? Pack a sweater and don't confuse {titles[0][:22]} with laundry!",
+                    "villager": f"TOWNIE: Psst! Word is MASON's boss trial ambushes folks on {titles[4][:22]}. Ask me for gossip or study clues!",
+                    "nurse": f"NURSE: Brain fried from {titles[1][:24]}? We'll heal your team—and ask me if you need a quick refresher!",
+                    "clerk": f"CLERK: Special deal: Potions on shelf 2, free study tips on {titles[2][:22]} right here! What do you wanna know?",
+                    "tr_rex": f"REX: I benchmarked all of '{course_title[:24]}' before breakfast. Need tutoring, or ready to lose?",
+                    "tr_cal": f"CAL: Hey! I'm scouting {titles[1][:26]} on this trail—want a quick tip first, or straight to battle?",
+                    "tr_mira": f"MIRA: No hand-waving on {titles[2][:26]}. Ask a smart question first, or step up and prove your logic.",
+                    "tr_rocco": f"ROCCO: {titles[3][:26]} takes real grit, kid! Pick my brain for field notes or jump into the fight!",
+                    "tr_mason": f"MASON: Bedrock guards the final trial of {titles[4][:26]}. Ask for wisdom first, or challenge Stonegate!",
+                },
+                "source": "story_template",
+                "model_name": f"{self.short_name} (Fallback)",
+                "latency_ms": 0.0,
+            }
+
+        if not self.is_live():
+            return fb
+
+        concept_list = [f"C{i}: {t}" for i, t in enumerate(titles)]
+        sys_msg = (
+            "You are Model #7, a hilarious, witty Retro-GBA RPG Storyteller and Persona Stylizer. "
+            f"Write strictly in {lang}. Turn the uploaded university course into a funny, memorable retro-RPG adventure! "
+            "Every line must be punchy (<= 132 characters), have genuine humor and personality, reference the course's "
+            "real topics accurately, and invite the player to ask NPCs questions about the course. "
+            "Output ONLY a strict JSON object with keys: `quest_title`, `story_intro` (list of 3 short strings), "
+            "and `npc_greetings` (dict with keys: `prof_ada`, `mom`, `villager`, `nurse`, `clerk`, `tr_rex`, `tr_cal`, `tr_mira`, `tr_rocco`, `tr_mason`)."
+        )
+        user_msg = json.dumps(
+            {
+                "task": "generate_course_rpg_story",
+                "language": lang,
+                "course_title": course_title[:60],
+                "concepts": concept_list,
+                "tone": "funny, clever, sarcastic-yet-encouraging retro Pokemon/GBA RPG adventure",
+            },
+            ensure_ascii=False,
+        )
+        messages = [
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": user_msg},
+        ]
+        t0 = time.perf_counter()
+        try:
+            prompt_str = self.tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            first_dev = next(self.model.parameters()).device
+            inputs = self.tokenizer(prompt_str, return_tensors="pt").to(first_dev)
+            with torch.no_grad():
+                out_ids = self.model.generate(
+                    **inputs,
+                    max_new_tokens=360,
+                    do_sample=True,
+                    temperature=0.78,
+                    top_p=0.92,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                )
+            gen_ids = out_ids[0][inputs["input_ids"].shape[1] :]
+            raw_text = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            parsed = extract_strict_json(raw_text)
+
+            q_title = _clip_gba_line(parsed.get("quest_title") or fb["quest_title"], 64)
+            raw_intro = parsed.get("story_intro")
+            intro = (
+                [_clip_gba_line(x) for x in raw_intro[:3] if str(x).strip()]
+                if isinstance(raw_intro, list) and len(raw_intro) >= 2
+                else fb["story_intro"]
+            )
+            greetings = dict(fb["npc_greetings"])
+            raw_g = parsed.get("npc_greetings")
+            if isinstance(raw_g, dict):
+                for k in list(greetings.keys()):
+                    val = raw_g.get(k)
+                    if isinstance(val, str) and len(val.strip()) >= 10:
+                        greetings[k] = _clip_gba_line(val)
+
+            return {
+                "language": lang,
+                "quest_title": q_title,
+                "story_intro": intro,
+                "npc_greetings": greetings,
+                "source": "live_qlora" if self.qlora_active else "live_llm",
+                "model_name": self.short_name,
+                "latency_ms": round(latency_ms, 1),
+            }
+        except Exception as exc:
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            print(f"  [LLM-7 Stylizer] Course story fallback: {exc}", flush=True)
+            fb["latency_ms"] = round(latency_ms, 1)
+            return fb
+        finally:
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
+    def generate_npc_chat_reply(
+        self,
+        npc_key: str,
+        student_question: str,
+        verified_fact: str,
+        course_title: str,
+        matched_concept: str,
+        overall_mastery: float,
+        chat_history: list = None,
+        language: str = None,
+    ) -> dict:
+        """
+        Interactive Overworld NPC Q&A powered by Model #7 (`Llama-3.1-8B QLoRA`)
+        grounded in Model #6's verified course fact. Answers the student's free-form
+        question with genuine RPG humor, warmth/sarcasm, and zero hallucination!
+        """
+        pk = npc_key if npc_key in PERSONA_PROFILES else "villager"
+        profile = PERSONA_PROFILES[pk]
+        speaker = profile["speaker"]
+        lang = language or detect_course_language(f"{student_question} {verified_fact} {course_title}")
+        m_pct = round(float(overall_mastery) * 100)
+
+        if lang == "French":
+            fb_reply = f"{speaker} : Bonne question ! Sur {matched_concept[:32]}, retiens surtout ceci : {verified_fact} (et avec {m_pct}% de maîtrise, tu es sur la bonne voie !)"
+        else:
+            fb_reply = f"{speaker}: Smart question! On {matched_concept[:32]}, the key thing is: {verified_fact} (at {m_pct}% mastery, you've totally got this!)"
+
+        if not self.is_live():
+            return {
+                "npc": pk,
+                "speaker": speaker,
+                "reply": fb_reply,
+                "verified_fact": verified_fact,
+                "matched_concept": matched_concept,
+                "source": "persona_template",
+                "model_name": f"{self.short_name} (Fallback)",
+                "latency_ms": 0.0,
+            }
+
+        sys_msg = (
+            f"You are {speaker} in the retro-GBA E-Learning RPG KnowledgeQuest. "
+            f"Personality: {profile['archetype']}. "
+            f"Answer the player's question in {lang} in 2-3 punchy, genuinely FUNNY and helpful sentences "
+            f"(max 280 characters total, no markdown, no bullet lists). "
+            f"You MUST accurately include the Verified Course Fact below (zero hallucination!) while keeping "
+            f"your hilarious in-character RPG humor so the player learns AND smiles!"
+        )
+        hist_msgs = [{"role": "system", "content": sys_msg}]
+        for turn in (chat_history or [])[-4:]:
+            r = turn.get("role")
+            c = str(turn.get("content") or "").strip()
+            if r in ("user", "assistant") and c:
+                hist_msgs.append({"role": r, "content": c[:240]})
+
+        user_prompt = (
+            f"Course: {course_title} | Matched Topic: {matched_concept} | Player Overall Mastery: {m_pct}%\n"
+            f"Verified Course Fact (MUST stay accurate): {verified_fact}\n"
+            f"Player asks you: {student_question}\n"
+            f"Reply directly as {speaker} in {lang} with humor + clear help:"
+        )
+        hist_msgs.append({"role": "user", "content": user_prompt})
+
+        t0 = time.perf_counter()
+        try:
+            prompt_str = self.tokenizer.apply_chat_template(
+                hist_msgs, tokenize=False, add_generation_prompt=True
+            )
+            first_dev = next(self.model.parameters()).device
+            inputs = self.tokenizer(prompt_str, return_tensors="pt").to(first_dev)
+            with torch.no_grad():
+                out_ids = self.model.generate(
+                    **inputs,
+                    max_new_tokens=130,
+                    do_sample=True,
+                    temperature=0.76,
+                    top_p=0.92,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                )
+            gen_ids = out_ids[0][inputs["input_ids"].shape[1] :]
+            raw_reply = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            clean_reply = re.sub(r"\s+", " ", raw_reply).strip().strip('"')
+            # Strip accidental JSON wrapper if QLoRA adapter emits {"reply": "..."}
+            if clean_reply.startswith("{") and "}" in clean_reply:
+                try:
+                    obj = extract_strict_json(clean_reply)
+                    if isinstance(obj, dict):
+                        vals = [v for v in obj.values() if isinstance(v, str) and len(v) > 8]
+                        if vals:
+                            clean_reply = " ".join(vals[:2])
+                        elif isinstance(obj.get("lines"), list):
+                            clean_reply = " ".join(str(x) for x in obj["lines"][:3])
+                except Exception:
+                    pass
+            if len(clean_reply) < 8:
+                clean_reply = fb_reply
+            if not clean_reply.upper().startswith(speaker):
+                clean_reply = f"{speaker}: {clean_reply}"
+            return {
+                "npc": pk,
+                "speaker": speaker,
+                "reply": clean_reply[:340],
+                "verified_fact": verified_fact,
+                "matched_concept": matched_concept,
+                "source": "live_qlora" if self.qlora_active else "live_llm",
+                "model_name": self.short_name,
+                "latency_ms": round(latency_ms, 1),
+            }
+        except Exception as exc:
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            print(f"  [LLM-7 Stylizer] NPC chat fallback ({pk}): {exc}", flush=True)
+            return {
+                "npc": pk,
+                "speaker": speaker,
+                "reply": fb_reply,
+                "verified_fact": verified_fact,
+                "matched_concept": matched_concept,
                 "source": "persona_template_fallback",
                 "model_name": f"{self.short_name} (Fallback)",
                 "latency_ms": round(latency_ms, 1),

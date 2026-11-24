@@ -1353,12 +1353,16 @@ class BattleSession {
 
   async runKnowledgeChallenge() {
     if (typeof AITutor === 'undefined' || !UI.askEncounterModal) return null;
+    if (AITutor.isOnline && AITutor.isOnline()) {
+      await UI.say('Stage 4 LLMs preparing adaptive challenge...', { noWait: true, keep: true });
+    }
     const enc = await AITutor.nextEncounter({
       wild: this.wild,
       trainer: this.trainer,
       enemyIdx: this.enemyIdx,
       enemyPartyLen: this.enemyParty.length,
     });
+    UI.hideDialog();
     return UI.askEncounterModal(enc);
   }
 

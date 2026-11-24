@@ -128,6 +128,12 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
                 puzzles = st.session.get_diagram_puzzles()
             self._send_json({'puzzles': puzzles})
             return
+        if route == '/api/course/story':
+            st = self.server_state
+            with st.lock:
+                story = st.session.get_course_story(allow_blocking=True)
+            self._send_json(story)
+            return
         if route == '/api/npc/dialogue':
             st = self.server_state
             qs = parse_qs(parsed.query)
@@ -283,6 +289,22 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
                 f"({rec['grader_latency_ms']:.1f}ms)"
             )
             self._send_json({'result': rec, 'status': snap})
+            return
+
+        if route == '/api/npc/chat':
+            npc_key = str(body.get('npc_key') or 'prof_ada')
+            student_q = str(body.get('question') or '').strip()
+            if not student_q:
+                self._send_json({'error': 'Question cannot be empty'}, status=400)
+                return
+            with st.lock:
+                res = st.session.chat_with_npc(npc_key=npc_key, student_question=student_q)
+            print(
+                f"  [NPC CHAT] {npc_key} ({res.get('model_name')}) | Q={student_q[:45]!r} "
+                f"| R={res.get('reasoner_ms',0):.0f}ms + S={res.get('latency_ms',0):.0f}ms",
+                flush=True,
+            )
+            self._send_json(res)
             return
 
         if route == '/api/course/ingest':

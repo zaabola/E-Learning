@@ -627,6 +627,109 @@ class QwenVLDiagramEngine:
         ]
         return final_box, coord_mode
 
+    def verify_box_contains_label_live(
+        self,
+        img: Image.Image,
+        box: list,
+        target_label: str,
+    ) -> bool:
+        """
+        Ultra-fast (~0.6s) Qwen-VL crop self-verification check.
+        Crops `box` (with tight edge-preserving padding, upscaled crisply) and asks
+        Qwen-VL whether the cropped region visibly contains `target_label` (YES/NO).
+        Prevents off-label boxes (e.g. 'Invite de commandes' instead of 'mongod',
+        or a neighboring oval/row) from silently passing as ground truth.
+        """
+        try:
+            width, height = img.size
+            bx1, by1, bx2, by2 = [float(v) for v in box]
+            bw = max(12.0, bx2 - bx1)
+            bh = max(10.0, by2 - by1)
+            # Tight padding so edge letters are intact without bleeding into adjacent rows
+            pad_x = min(8.0, max(3.0, bw * 0.06))
+            pad_y = min(5.0, max(2.0, bh * 0.08))
+            x1 = max(0, int(round(bx1 - pad_x)))
+            y1 = max(0, int(round(by1 - pad_y)))
+            x2 = min(width, int(round(bx2 + pad_x)))
+            y2 = min(height, int(round(by2 + pad_y)))
+            cw, ch = x2 - x1, y2 - y1
+            if cw < 8 or ch < 8:
+                return False
+
+            crop = img.convert("RGB").crop((x1, y1, x2, y2))
+            low_id = (self.model_id or "").lower()
+            is_qwen3 = "qwen3" in low_id
+            stride = 32 if is_qwen3 else 28
+
+            scale = min(384.0 / float(cw), 224.0 / float(ch))
+            scale = max(1.5, min(scale, 4.0))
+            aw = max(stride * 4, int(round((cw * scale) / float(stride))) * stride)
+            ah = max(stride * 3, int(round((ch * scale) / float(stride))) * stride)
+            aligned = crop.resize(
+                (aw, ah),
+                Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC,
+            )
+
+            ip = getattr(self.vlm_processor, "image_processor", None)
+            if ip is not None:
+                px_area = aw * ah
+                unit = stride * stride
+                if hasattr(ip, "min_pixels"):
+                    ip.min_pixels = min(px_area, 32 * unit)
+                if hasattr(ip, "max_pixels"):
+                    ip.max_pixels = max(px_area, 512 * unit)
+                if hasattr(ip, "size") and isinstance(ip.size, dict):
+                    ip.size["shortest_edge"] = min(px_area, 32 * unit)
+                    ip.size["longest_edge"] = max(px_area, 512 * unit)
+
+            verify_prompt = (
+                f'Read the text visible inside this cropped image. '
+                f'Does this cropped image visibly contain the text "{target_label}"? '
+                f'Answer with ONLY one word: YES or NO.'
+            )
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": aligned},
+                        {"type": "text", "text": verify_prompt},
+                    ],
+                }
+            ]
+            t0 = time.perf_counter()
+            text_input = self.vlm_processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            inputs = self.vlm_processor(
+                text=[text_input],
+                images=[aligned],
+                padding=True,
+                return_tensors="pt",
+            )
+            inputs.pop("token_type_ids", None)
+            inputs = inputs.to(self.vlm_model.device)
+            with torch.no_grad():
+                gen_ids = self.vlm_model.generate(
+                    **inputs,
+                    max_new_tokens=6,
+                    do_sample=False,
+                )
+            trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], gen_ids)]
+            raw = self.vlm_processor.batch_decode(
+                trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            )[0].strip()
+            dt = time.perf_counter() - t0
+            ans = raw.upper()
+            verdict = ans.startswith("YES") or ("YES" in ans and "NO" not in ans)
+            print(
+                f"  [{self.short_model_name} VERIFY {dt:.1f}s] '{target_label}' in {[round(v, 1) for v in box]} -> {'YES' if verdict else 'NO'} ({raw!r})",
+                flush=True,
+            )
+            return verdict
+        except Exception as exc:
+            print(f"  [{self.short_model_name} VERIFY] Skipped on '{target_label}': {exc}", flush=True)
+            return True
+
     def refine_box_zoom_live(
         self,
         img: Image.Image,
@@ -771,14 +874,24 @@ class QwenVLDiagramEngine:
             )
             return coarse_box
 
-        # Safety Guard 3: Prevent wild cross-diagram jumps unless rescuing a blank coarse box
+        # Safety Guard 3: When zoom jumps far (>115px), verify WHICH box actually contains the label!
+        # If coarse landed on the wrong element (e.g. 'Invite de commandes' instead of 'mongod')
+        # and zoom found the real target, accept the zoom rescue instead of discarding it.
         c_cx, c_cy = 0.5 * (bx1 + bx2), 0.5 * (by1 + by2)
         z_cx, z_cy = 0.5 * (zbox[0] + zbox[2]), 0.5 * (zbox[1] + zbox[3])
         jump_px = math.hypot(z_cx - c_cx, z_cy - c_cy)
         max_jump = 230.0 if coarse_is_blank else 115.0
         if jump_px > max_jump:
+            coarse_ok = False if coarse_is_blank else self.verify_box_contains_label_live(img, coarse_box, target_label)
+            zoom_ok = self.verify_box_contains_label_live(img, zbox, target_label)
+            if zoom_ok and not coarse_ok:
+                print(
+                    f"  [{self.short_model_name} ZOOM-RESCUE {dt:.1f}s] Accepted {jump_px:.1f}px jump on '{target_label}' (coarse=NO, zoom=YES) -> canvas={zbox}",
+                    flush=True,
+                )
+                return zbox
             print(
-                f"  [{self.short_model_name} ZOOM-GUARD] Rejected large jump ({jump_px:.1f}px > {max_jump:.0f}px) on '{target_label}'",
+                f"  [{self.short_model_name} ZOOM-GUARD] Rejected large jump ({jump_px:.1f}px > {max_jump:.0f}px, coarse={coarse_ok}, zoom={zoom_ok}) on '{target_label}'",
                 flush=True,
             )
             return coarse_box
@@ -789,6 +902,131 @@ class QwenVLDiagramEngine:
         )
         return zbox
 
+    def _ground_in_subregion_live(
+        self,
+        img: Image.Image,
+        target_label: str,
+        region_rect: tuple,
+        tag: str = "SUBREGION",
+    ) -> list:
+        """
+        High-resolution grounding pass restricted to a specific sub-rectangle `(rx1, ry1, rw, rh)`
+        (e.g. left-hand table operator column or top/bottom half rescue).
+        Decodes predicted boxes directly back into full canvas coordinates, trims blank margins,
+        and returns deduplicated non-blank canvas boxes.
+        """
+        width, height = img.size
+        rx1, ry1, rw, rh = [int(round(v)) for v in region_rect]
+        rx1 = max(0, min(width - 1, rx1))
+        ry1 = max(0, min(height - 1, ry1))
+        rx2 = max(rx1 + 1, min(width, rx1 + rw))
+        ry2 = max(ry1 + 1, min(height, ry1 + rh))
+        rw, rh = rx2 - rx1, ry2 - ry1
+        if rw < 64 or rh < 48:
+            return []
+
+        low_id = (self.model_id or "").lower()
+        is_qwen3 = "qwen3" in low_id
+        is_qwen25 = ("2.5" in low_id or "2_5" in low_id) and not is_qwen3
+        stride = 32 if is_qwen3 else 28
+
+        sub_crop = img.convert("RGB").crop((rx1, ry1, rx2, ry2))
+        scale = min(768.0 / float(rw), 512.0 / float(rh))
+        scale = max(1.0, scale)
+        aw = max(stride * 8, int(round((rw * scale) / float(stride))) * stride)
+        ah = max(stride * 6, int(round((rh * scale) / float(stride))) * stride)
+        aligned_sub = sub_crop.resize(
+            (aw, ah),
+            Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC,
+        )
+
+        ip = getattr(self.vlm_processor, "image_processor", None)
+        if ip is not None:
+            px_area = aw * ah
+            unit = stride * stride
+            if hasattr(ip, "min_pixels"):
+                ip.min_pixels = min(px_area, 128 * unit)
+            if hasattr(ip, "max_pixels"):
+                ip.max_pixels = max(px_area, 1400 * unit)
+            if hasattr(ip, "size") and isinstance(ip.size, dict):
+                ip.size["shortest_edge"] = min(px_area, 128 * unit)
+                ip.size["longest_edge"] = max(px_area, 1400 * unit)
+
+        sub_prompt = (
+            f'Inspect this cropped diagram region closely. '
+            f'If the exact text "{target_label}" appears anywhere inside this crop, output the bounding box '
+            f'of EVERY component shape or table cell holding "{target_label}" '
+            f'(NEVER box empty margin or a different label!). '
+            f'If "{target_label}" does NOT appear in this crop, output []. '
+            f'Output ONLY JSON: [{{"bbox_2d": [x1, y1, x2, y2]}}]'
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": aligned_sub},
+                    {"type": "text", "text": sub_prompt},
+                ],
+            }
+        ]
+        t0 = time.perf_counter()
+        text_input = self.vlm_processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.vlm_processor(
+            text=[text_input],
+            images=[aligned_sub],
+            padding=True,
+            return_tensors="pt",
+        )
+        inputs.pop("token_type_ids", None)
+        inputs = inputs.to(self.vlm_model.device)
+
+        model_w, model_h = float(aw), float(ah)
+        if "image_grid_thw" in inputs and inputs["image_grid_thw"] is not None:
+            thw = inputs["image_grid_thw"][0].detach().cpu().tolist()
+            if len(thw) == 3:
+                patch_px = 16.0 if is_qwen3 else 14.0
+                model_h = float(thw[1]) * patch_px
+                model_w = float(thw[2]) * patch_px
+
+        with torch.no_grad():
+            gen_ids = self.vlm_model.generate(
+                **inputs,
+                max_new_tokens=160,
+                do_sample=False,
+            )
+        trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], gen_ids)]
+        raw = self.vlm_processor.batch_decode(
+            trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0]
+        dt = time.perf_counter() - t0
+
+        matches = re.findall(
+            r'"bbox_2d"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]',
+            raw,
+        )
+        found = []
+        for m in matches[:4]:
+            rb = [float(v) for v in m]
+            cbox, _ = self._decode_raw_box_to_canvas(
+                rb, is_qwen3, is_qwen25, model_w, model_h, (rx1, ry1, rw, rh), width, height
+            )
+            cbox = trim_blank_margins(img, cbox)
+            c_area = max(1.0, (cbox[2] - cbox[0]) * (cbox[3] - cbox[1]))
+            if c_area > 0.88 * float(rw * rh):
+                continue
+            if box_content_stats(img, cbox)["is_blank"]:
+                continue
+            if all(compute_iou(cbox, prev) < 0.55 for prev in found):
+                found.append(cbox)
+
+        print(
+            f"  [{self.short_model_name} {tag} {dt:.1f}s] '{target_label}' | rect=({rx1},{ry1},{rw}x{rh}) -> {len(found)} box(es): {found}",
+            flush=True,
+        )
+        return found
+
     def ground_target_occurrences_live(
         self,
         img: Image.Image,
@@ -798,9 +1036,10 @@ class QwenVLDiagramEngine:
         Dedicated high-resolution single-target grounding pass that finds EVERY visible
         occurrence of `target_label` on the diagram:
           - Eliminates cross-label interference between Component A and Component B.
-          - Prevents averaging top & bottom occurrences into the middle when a label
-            (e.g. 'TABLE_NAME' or 'COMMENTS') appears more than once on the same slide.
-          - Trims blank outer margins and filters empty white-background boxes.
+          - Scans left-to-right, top-to-bottom with ample token budget (`max_new_tokens=256`)
+            so multi-occurrence labels (e.g. `$regex`, `TABLE_NAME`, `mongod`) never truncate.
+          - Self-verifies cropped boxes via Qwen-VL (`verify_box_contains_label_live`) to
+            rescue off-label boxes and recover missed left-column table headers/operators.
         Returns a list of valid `[x1, y1, x2, y2]` canvas boxes (at least 1 if found).
         """
         self.load_live_vlm()
@@ -811,6 +1050,7 @@ class QwenVLDiagramEngine:
         stride = 32 if is_qwen3 else 28
 
         aligned_img, crop_rect = self._crop_letterbox_and_align28(img, stride=stride, high_res=True)
+        cx1, cy1, cw, ch = crop_rect
         aw, ah = aligned_img.size
 
         ip = getattr(self.vlm_processor, "image_processor", None)
@@ -826,11 +1066,12 @@ class QwenVLDiagramEngine:
                 ip.size["longest_edge"] = max(px_area, 1600 * unit)
 
         ground_prompt = (
-            f'Locate EVERY visible occurrence of "{target_label}" inside this diagram. '
-            f'For each occurrence, output the bounding box of its ENTIRE enclosing component shape '
-            f'(cylinder, rectangle, oval, cloud, or table cell holding "{target_label}" — '
-            f'include all wrapped text lines and outer border, NEVER empty white background margin!). '
-            f'Output ONLY a JSON list: [{{"bbox_2d": [x1, y1, x2, y2], "label": "{target_label}"}}]'
+            f'Scan the ENTIRE diagram left-to-right and top-to-bottom and locate EVERY visible occurrence '
+            f'of "{target_label}" (check narrow left-hand table/operator columns, title bars, command lines, '
+            f'diagram shapes, and right-hand example/code cells). '
+            f'For each occurrence, output the bounding box of its ENTIRE enclosing component shape or table cell '
+            f'holding "{target_label}" (include wrapped text and borders, NEVER box empty white margin or a different label!). '
+            f'Output ONLY a compact JSON list (up to 6 boxes): [{{"bbox_2d": [x1, y1, x2, y2]}}]'
         )
         messages = [
             {
@@ -865,7 +1106,7 @@ class QwenVLDiagramEngine:
         with torch.no_grad():
             gen_ids = self.vlm_model.generate(
                 **inputs,
-                max_new_tokens=128,
+                max_new_tokens=256,
                 do_sample=False,
             )
         trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], gen_ids)]
@@ -891,7 +1132,7 @@ class QwenVLDiagramEngine:
 
         decoded_all = []
         cmode = "0..1000"
-        for rb in raw_boxes[:4]:
+        for rb in raw_boxes[:6]:
             cbox, cmode = self._decode_raw_box_to_canvas(
                 rb, is_qwen3, is_qwen25, model_w, model_h, crop_rect, width, height
             )
@@ -915,11 +1156,61 @@ class QwenVLDiagramEngine:
                 candidates = [refined]
             except Exception as z_exc:
                 print(f"  [{self.short_model_name} ZOOM-REFINE] Skipped on '{target_label}': {z_exc}", flush=True)
+
+            # Self-verify single box: if Qwen confirms it does NOT contain target_label,
+            # run a top/bottom half high-res rescue scan to find the true component!
+            if not self.verify_box_contains_label_live(img, candidates[0], target_label):
+                half_h = int(round(ch * 0.58))
+                bot_y = cy1 + int(round(ch * 0.42))
+                bot_h = max(48, (cy1 + ch) - bot_y)
+                rescued = []
+                for r_tag, rect in (
+                    ("RESCUE-TOP", (cx1, cy1, cw, half_h)),
+                    ("RESCUE-BOT", (cx1, bot_y, cw, bot_h)),
+                ):
+                    for rb_cand in self._ground_in_subregion_live(img, target_label, rect, tag=r_tag):
+                        if self.verify_box_contains_label_live(img, rb_cand, target_label):
+                            if all(compute_iou(rb_cand, prev) < 0.55 for prev in rescued):
+                                rescued.append(rb_cand)
+                if rescued:
+                    print(
+                        f"  [{self.short_model_name} OFF-LABEL RESCUE] Replaced unverified {candidates[0]} with verified {rescued} for '{target_label}'",
+                        flush=True,
+                    )
+                    candidates = rescued
         else:
             print(
                 f"  [{self.short_model_name} GROUND {dt:.1f}s] '{target_label}' ({len(candidates)} occs) | mode={cmode} | aligned={aw}x{ah} -> canvas={candidates}",
                 flush=True,
             )
+            # Filter out any false-positive boxes from multi-occurrence lists via fast crop verification
+            verified_multi = [b for b in candidates if self.verify_box_contains_label_live(img, b, target_label)]
+            if verified_multi:
+                candidates = verified_multi
+
+            # Left-Column Table Rescue: if >=2 occurrences were found and ALL sit in the right half
+            # (e.g. '$regex' spotted only in the right 'Exemple' column, missing left 'Opérateur' cell),
+            # zoom into the left half, verify any match, and add it to valid_boxes!
+            if cw >= 420 and len(candidates) >= 2 and all(b[0] > cx1 + 0.42 * cw for b in candidates):
+                left_w = int(round(cw * 0.52))
+                left_hits = self._ground_in_subregion_live(
+                    img, target_label, (cx1, cy1, left_w, ch), tag="LEFT-COL-CHECK"
+                )
+                added_left = []
+                for lb in left_hits:
+                    if self.verify_box_contains_label_live(img, lb, target_label):
+                        if all(compute_iou(lb, prev) < 0.55 for prev in candidates + added_left):
+                            added_left.append(lb)
+                if added_left:
+                    print(
+                        f"  [{self.short_model_name} LEFT-COL RESCUE] Added verified left-column occurrence(s) {added_left} for '{target_label}'",
+                        flush=True,
+                    )
+                    candidates = added_left + candidates
+
+        # Order multi-occurrence candidates left-column first, then top-to-bottom
+        if len(candidates) > 1:
+            candidates.sort(key=lambda b: (int(b[0] // 90.0), b[1]))
         return candidates
 
     def ground_components_batch_live(

@@ -10,7 +10,6 @@ Off by default. Turn it on with `python run.py --speak`, or press v in the windo
     so the coach's voice is never scored as yours: no fake pace, fillers, stress or "you froze".
   * Sound effects are ducked while it talks (sfx.duck).
 """
-import os
 import queue
 import shutil
 import subprocess
@@ -135,11 +134,3 @@ class Speaker(threading.Thread):
         self.enabled = False
         return False
 
-
-if __name__ == "__main__":  # quick test: python -m coach.speaker "Breathe out slowly"
-    sp = Speaker(enabled=True, language=os.environ.get("TIP_LANG", "en"))
-    sp.start()
-    sp.say(" ".join(sys.argv[1:]) or "Breathe out slowly")
-    sp.stop()
-    sp.join(timeout=30)
-    print(f"backend: {sp.backend}" + (f" ({sp.warning})" if sp.warning else ""))

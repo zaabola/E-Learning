@@ -1,11 +1,11 @@
 """Live camera window (OpenCV) in a chunky retro handheld-RPG style.
 
-Pixelated webcam feed + face brackets, a status screen with HP-style bars, the coach's tips in a dialog box
+Webcam feed (mirrored, like a mirror) + face brackets, a status screen with HP-style bars, the coach's tips in a dialog box
 that types itself out (with text blips), and pop-ups / flashes when a tip works, on praise and on level up.
 
 Runs on the main thread (OpenCV windows must, especially on Windows).
-Only draws: it reads the same snapshot dict the terminal view and the game use, plus the GameFeel state.
-Keys: q / Esc quit, l landmarks, m mirror, p pixel size, s sound on/off.
+Only draws: it reads the same snapshot dict that is logged (and that the game will use), plus the GameFeel state.
+Keys: q / Esc quit, s sound on/off, v spoken tips on/off.
 """
 import math
 import time
@@ -17,9 +17,8 @@ from .juice import ROWS, SHORT, GameFeel, row_value, zone
 from .pixelfont import draw_text, line_height, text_width, wrap
 
 WINDOW = "Oral coach"
-CANVAS = (540, 960)  # h, w used when there is no camera (--no-face)
+CANVAS = (540, 960)  # h, w used when there is no camera
 PANEL_W = 420
-PIXEL_SIZES = [1, 3, 5, 8]  # camera pixel block size, cycled with "p" (1 = off)
 TYPE_SPEED = 42.0           # characters per second for the dialog typewriter
 
 
@@ -123,21 +122,11 @@ def tint(img, colour, amount):
     cv2.addWeighted(overlay, amount, img, 1 - amount, 0, img)
 
 
-def pixelate(img, block: int):
-    """Chunky pixels + fewer colours, like an old handheld screen."""
-    if block <= 1:
-        return img
-    h, w = img.shape[:2]
-    small = cv2.resize(img, (max(1, w // block), max(1, h // block)), interpolation=cv2.INTER_AREA)
-    small = (small // 40) * 40 + 20  # posterize: ~7 levels per channel
-    return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
-
-
 _STAGE = {}
 
 
 def stage(h, w, msg):
-    """Pixel-art stage drawn in code, shown when there is no camera (--no-face)."""
+    """Pixel-art stage drawn in code, shown when there is no camera."""
     key = (h, w, msg)
     if key in _STAGE:
         return _STAGE[key].copy()
@@ -184,15 +173,11 @@ def stage(h, w, msg):
 
 
 # --- camera side --------------------------------------------------------------------------------
-def draw_face(img, face: dict, mirror: bool, landmarks: bool, t: float):
+def draw_face(img, face: dict, t: float):
     h, w = img.shape[:2]
-    pts = np.array([((1 - x) if mirror else x, y) for x, y in face["points"]]) * (w, h)
+    pts = np.array([(1 - x, y) for x, y in face["points"]]) * (w, h)  # 1 - x: the image is mirrored
     colour = GREEN if face["looking"] else YELLOW
     q = 3
-    if landmarks:
-        for x, y in pts[::4].astype(int):
-            x, y = x // q * q, y // q * q
-            rect(img, x, y, x + q, y + q, colour)
     x0, y0 = (pts.min(0) // q * q).astype(int)
     x1, y1 = (pts.max(0) // q * q).astype(int)
     pad = 6 + int(2 * math.sin(t * 4)) // 2 * 2  # brackets "breathe" a little
@@ -440,16 +425,15 @@ def draw_panel(img, snap: dict | None, warnings: list[str], coach: dict | None =
 
 
 # --- whole frame --------------------------------------------------------------------------------
-def compose(frame, face, snap, warnings, mirror=True, landmarks=True, fps=None, coach=None,
-            feel=None, shown=None, pixel=5, now=None, sound_on=True, voice_on=None):
+def compose(frame, face, snap, warnings, fps=None, coach=None,
+            feel=None, shown=None, now=None, sound_on=True, voice_on=None):
     now = time.time() if now is None else now
     if frame is None:
         cam = stage(*CANVAS, "NO CAMERA")
     else:
-        cam = cv2.flip(frame, 1) if mirror else frame.copy()
-        cam = pixelate(cam, pixel)
+        cam = cv2.flip(frame, 1)  # mirrored, like looking in a mirror
         if face is not None:
-            draw_face(cam, face, mirror, landmarks, now)
+            draw_face(cam, face, now)
         else:
             box(cam, 8, 8, 230, 48, WIN, YELLOW, 2)
             text(cam, "NO FACE FOUND", 22, 20, 2, YELLOW)
@@ -469,7 +453,7 @@ def compose(frame, face, snap, warnings, mirror=True, landmarks=True, fps=None, 
     if feel is not None:
         draw_levelup(cam, feel, now)
     if fps and not (coach and coach.get("tip")):
-        hint = f"{fps:.0f}fps  q quit  l landmarks  m mirror  p pixels  s sound {'on' if sound_on else 'off'}"
+        hint = f"{fps:.0f}fps  q quit  s sound {'on' if sound_on else 'off'}"
         if voice_on is not None:
             hint += f"  v voice {'on' if voice_on else 'off'}"
         text_right(cam, hint, cam.shape[1] - 10, 10, 1, WHITE)
@@ -481,12 +465,9 @@ def compose(frame, face, snap, warnings, mirror=True, landmarks=True, fps=None, 
 class Window:
     """Call show() in a loop on the main thread. Returns False when the user quits."""
 
-    def __init__(self, mirror=True, landmarks=True, scale=1.0, feel: GameFeel | None = None,
-                 pixel: int = 5, speaker=None):
+    def __init__(self, feel: GameFeel | None = None, speaker=None):
         self.speaker = speaker
-        self.mirror, self.landmarks, self.scale = mirror, landmarks, scale
         self.feel = feel
-        self.pixel = pixel
         self.shown = {}
         self._t, self._fps = time.time(), None
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
@@ -502,29 +483,20 @@ class Window:
             tip_id, n, full = typed_chars(coach)
             if tip_id and (coach.get("tip_age") or 0) < coach.get("tip_show", 12.0):
                 self.feel.typed(tip_id, n, full)
-        img = compose(frame, face, snap, warnings, self.mirror, self.landmarks, self._fps, coach,
-                      self.feel, self.shown, self.pixel, now, sound_on,
+        img = compose(frame, face, snap, warnings, self._fps, coach,
+                      self.feel, self.shown, now, sound_on,
                       None if self.speaker is None else self.speaker.enabled)
-        if self.scale != 1.0:
-            img = cv2.resize(img, None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_NEAREST)
         cv2.imshow(WINDOW, img)
         key = cv2.waitKey(15) & 0xFF
         if key in (ord("q"), 27):
             return False
         if key == ord("v") and self.speaker is not None:
             self.speaker.toggle()
-        if key in (ord("l"), ord("m"), ord("p"), ord("s"), ord("v")) and self.feel:
+        if key in (ord("s"), ord("v")) and self.feel:
             if key == ord("s") and sfx:
                 sfx.volume, sfx.saved_volume = (0.0, sfx.volume) if sfx.volume > 0 else (
                     getattr(sfx, "saved_volume", 0.6) or 0.6, 0.0)
             self.feel.key()
-        if key == ord("l"):
-            self.landmarks = not self.landmarks
-        if key == ord("m"):
-            self.mirror = not self.mirror
-        if key == ord("p"):
-            self.pixel = PIXEL_SIZES[(PIXEL_SIZES.index(self.pixel) + 1) % len(PIXEL_SIZES)
-                                     ] if self.pixel in PIXEL_SIZES else PIXEL_SIZES[0]
         try:  # closed with the X button
             if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
                 return False

@@ -88,8 +88,6 @@ class FaceSensor(threading.Thread):
             self.error = str(e)
             return
         period = 1.0 / self.cfg.camera_fps
-        is_file = isinstance(self.cfg.camera_index, str)
-        file_dt = 1.0 / (cap.get(cv2.CAP_PROP_FPS) or 30.0) if is_file else 0.0
         start = time.time()
         last_analysis = 0.0
         while not self.stop.is_set():
@@ -106,8 +104,6 @@ class FaceSensor(threading.Thread):
                     self.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), t0, int((t0 - start) * 1000))
                 except Exception as e:
                     self.sig.push("warning", f"face frame error: {e}")
-            if is_file:
-                time.sleep(max(0.0, file_dt - (time.time() - t0)))
         cap.release()
 
     def process(self, rgb: np.ndarray, t: float, ts_ms: int):

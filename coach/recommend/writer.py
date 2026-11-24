@@ -1,12 +1,12 @@
 """Tip writer: turns (pattern + evidence + retrieved advice) into one short, personal tip.
 
-Backends, tried in this order with --llm auto:
+Backends, tried in this order (mode "auto", the default):
   ollama     local model through Ollama (free, offline, runs on your GPU). Default model qwen2.5:3b.
   claude     Anthropic API (needs `pip install anthropic` and ANTHROPIC_API_KEY).
   template   no LLM: uses the card's own wording. Always available, instant; also the fallback
              whenever an LLM is slow (> timeout) or returns something unusable.
 
-The LLM only rewrites retrieved advice for this moment. It never chooses the strategy (the bandit does)
+The LLM only rewrites retrieved advice for this moment. It never chooses the strategy (the coach does)
 and never invents the source: the citation always comes from the card.
 """
 import concurrent.futures as cf

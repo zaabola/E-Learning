@@ -10,7 +10,6 @@ silero-vad
 praat-parselmouth
 transformers
 faster-whisper
-rich
 pyttsx3        # spoken tips (--speak / v key); offline Windows voices
-# optional: tips worded by Claude (--llm claude). Ollama needs no Python package.
+# optional: tips worded by Claude (when Ollama is not running). Ollama needs no Python package.
 # anthropic

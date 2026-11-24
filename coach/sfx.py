@@ -8,9 +8,6 @@ Playback: a small mixer on a `sounddevice` output stream (already installed for 
 sounds can play at once with low delay. If that fails it falls back to Windows' built-in `winsound`
 (one sound at a time), and if that fails too it stays silent and sets `sfx.warning`.
 
-    python -m coach.sfx             # plays every sound once, with its name
-    python -m coach.sfx --export sounds   # writes them all as .wav files (e.g. to reuse in the game)
-
 Tip: use headphones during real sessions, so the microphone does not hear the coach's own sounds.
 """
 import io
@@ -268,34 +265,3 @@ class Sfx:
             self._stream.stop()
             self._stream.close()
             self._stream = None
-
-
-def main():
-    import argparse
-    ap = argparse.ArgumentParser(description="Play or export the coach's sound effects")
-    ap.add_argument("--export", metavar="FOLDER", help="write every sound as a .wav file")
-    ap.add_argument("--volume", type=float, default=0.6)
-    args = ap.parse_args()
-    if args.export:
-        os.makedirs(args.export, exist_ok=True)
-        for name, x in build_sounds().items():
-            with open(os.path.join(args.export, f"{name}.wav"), "wb") as f:
-                f.write(to_wav_bytes(x * args.volume))
-        print(f"Wrote {len(build_sounds())} sounds to {args.export}/")
-        return
-    sfx = Sfx(volume=args.volume)
-    print(f"Sound backend: {sfx.backend}" + (f" ({sfx.warning})" if sfx.warning else ""))
-    for name, x in sfx.sounds.items():
-        print(f"  {name:<11} {len(x) / SR:.2f} s")
-        if name.startswith("blip"):
-            for _ in range(12):
-                sfx.blip()
-                time.sleep(0.045)
-        else:
-            sfx.play(name)
-        time.sleep(len(x) / SR + 0.45)
-    sfx.close()
-
-
-if __name__ == "__main__":
-    main()

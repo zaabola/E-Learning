@@ -48,28 +48,6 @@ class MicSource:
         self.stream.stop()
 
 
-class FileSource:
-    """Plays an audio file through the pipeline in real time (for demos and tests)."""
-    def __init__(self, path: str, cfg: Config, realtime: bool = True):
-        import subprocess
-        raw = subprocess.run(["ffmpeg", "-v", "quiet", "-i", path, "-ac", "1", "-ar", str(cfg.sample_rate),
-                              "-f", "f32le", "-"], capture_output=True, check=True).stdout
-        self.audio = np.frombuffer(raw, dtype=np.float32)
-        self.sr, self.realtime = cfg.sample_rate, realtime
-        self.done = threading.Event()
-
-    def blocks(self, stop: threading.Event):
-        start = time.time()
-        for i in range(0, len(self.audio) - BLOCK + 1, BLOCK):
-            if stop.is_set():
-                break
-            t = start + (i + BLOCK) / self.sr
-            if self.realtime:
-                time.sleep(max(0.0, t - time.time()))
-            yield t, self.audio[i:i + BLOCK].copy()
-        self.done.set()
-
-
 # ---------------------------------------------------------------- main sensor
 class VoiceSensor(threading.Thread):
     def __init__(self, cfg: Config, signals: Signals, stop: threading.Event,

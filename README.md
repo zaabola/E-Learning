@@ -2,96 +2,37 @@
 
 Reads your webcam and microphone while you practise, and shows live scores in a camera window: your mirrored
 webcam image with a box around your face (green = looking at the camera, yellow = looking away), what you just said
-as subtitles, and a score panel on the right. The old terminal dashboard is still there with `--terminal`.
-It writes every snapshot as JSON. On top of that sits the **coach**: it spots patterns over time (stressed for
+as subtitles, and a score panel on the right. Every snapshot is saved as JSON in a session log. On top of that sits the **coach**: it spots patterns over time (stressed for
 20 s, confident then a drop, voice tense while the face looks calm...), retrieves advice from a small library of
 cited tip cards, lets an LLM word one short tip with a "why", shows it on the camera image, then checks whether it
 helped (IT WORKED, or a stronger tip with a different strategy). See [The coach](#the-coach-recommendations) below.
 The window has a chunky retro handheld-RPG look with game sound effects. See [Retro look and sounds](#retro-look-and-sounds).
-
-```
-╭──────────────────── Oral coach · live signals · 14s ────────────────────╮
-│ Calibrated to your voice and face                                       │
-│        Stress  ████████████████████···· 0.83  0.5 = your normal         │
-│    Confidence  █████████··············· 0.36  0.5 = your normal         │
-│        Energy  ████████████············ 0.50  0.5 = your normal         │
-│    Positivity  ████···················· 0.15  0.5 = your normal         │
-│   Eye contact  ██████████████████······ 0.76  share of last 5 s         │
-│ Voice variety  ████████················ 0.32  low = monotone            │
-│          Pace  ███████████████████████· 0.97  0.5 = your normal         │
-│ Pace 310 wpm   Fillers 25.5 /min   Silence 0.0 s   Face neutral 0.56    │
-╰─────────────────────────────────────────────────────────────────────────╯
-```
 
 ## Setup (once)
 
 1. Python 3.11 to 3.13, ideally in a virtual environment.
 2. Install PyTorch **with CUDA** from https://pytorch.org/get-started/locally/ (pick your OS, pip, CUDA 12.x).
 3. `pip install -r requirements.txt`
-4. `python setup_models.py` downloads all models (~2 GB) so the first run starts fast.
-5. Only needed for `--audio some_file` and for video mode: have `ffmpeg` on your PATH (`winget install ffmpeg`).
+4. `python setup_models.py` downloads all models (~2 GB) so the first run starts fast
+   (add `--whisper-model base` if you run with the base speech-to-text model).
 
 ## Run
 
 | Command | What it does |
 | --- | --- |
-| `python run.py` | Full stack: webcam + mic, camera window with scores |
-| `python run.py --video talk.mp4 --out coached.mp4` | Video mode: coach a recording, write an annotated MP4 (see below) |
-| `python run.py --light --no-voice` | Quickest camera check: only MediaPipe on the webcam |
-| `python run.py --terminal` | Old terminal dashboard instead of the camera window |
-| `python run.py --scale 1.5` / `--no-mirror` | Bigger window / don't mirror the image |
-| `python run.py --light` | Fallback: MediaPipe + prosody only, no emotion models |
-| `python run.py --language fr` | Force the speech-to-text language (default: auto-detect) |
+| `python run.py` | Webcam + mic, camera window with scores and tips |
 | `python run.py --whisper-model base` | Use a faster, less accurate speech-to-text model |
-| `python run.py --video talk.mp4 --audio talk.mp4` | Replay a recording instead of live input |
-| `python run.py --json` | JSON lines on stdout (ticks + coach events), no window (this is what the game will read) |
-| `python run.py --llm template` | Tips without any LLM (card wording). Others: `auto` (default), `ollama`, `claude` |
-| `python run.py --tip-language fr` | Tips in French (needs an LLM; the cards are in English) |
-| `python run.py --no-coach` | Signals only, no tips |
-| `python run.py --no-sound` / `--volume 0.3` | No sound effects / quieter ones (default 0.6) |
-| `python run.py --pixel 8` | Bigger camera pixels (`1` = normal image, the default) |
-| `python run.py --speak` | Read each tip out loud (short version), so you can keep looking at the camera. `v` toggles it |
-| `python test_patterns.py` | Checks the face+voice and over-time patterns on made-up data (under a second) |
-| `python test_coach.py` | Checks the whole coach on made-up data: no tip when calm, IT WORKED, escalation with a new strategy, filler and pace counts restart at a tip |
-| `python -m coach.sfx` | Plays every sound effect once with its name (`--export sounds` writes them as .wav files) |
+| `python run.py --speak` | Read each tip out loud from the start (short version), so you can keep looking at the camera |
 
-In the camera window: `q` or Esc quits, `l` toggles the face landmarks, `m` toggles mirroring, `p` cycles the pixel size, `s` turns the sound on or off, `v` turns spoken tips on or off. In the terminal modes press Ctrl+C. Each session is saved to `logs/session-<time>.jsonl`.
+In the camera window: `q` or Esc quits, `s` turns the sound on or off, `v` turns spoken tips on or off. Each session is saved to `logs/session-<time>.jsonl`.
 
 **Calibration:** for the first 30 seconds of speech the coach learns *your* normal pitch, volume, pace and
 expression. After that, 0.5 means "like your normal" and the bars move when you drift from it.
 So start each session by talking normally for half a minute.
 
-## Video mode (record yourself, get an annotated MP4)
-
-```
-python run.py --video my-talk.mp4 --out my-talk-coached.mp4
-```
-
-The recording goes through the same coach as a live session, but on the video's own clock (frame N is at
-N / fps seconds), not the wall clock. Nothing has to keep up with real time, so it may take longer than the
-video lasts, and nothing is dropped. The MP4 has your original video with the retro overlay on every frame (tips,
-"why", bars, FEELING line, XP), and your original sound with the coach's sound effects mixed in. The tips are also
-printed with their time in the video, and everything is logged to `logs/video-<name>-<time>.jsonl`.
-
-Since it is not live, video mode uses better settings than live mode (live mode is unchanged):
-
-| | Live | Video mode |
-| --- | --- | --- |
-| Face analysis | 10 frames per second | every frame |
-| Speech-to-text | Whisper `small`, greedy | Whisper `large-v3-turbo`, beam search 5 (falls back to `medium` on old faster-whisper) |
-| Voice emotion | every 1.5 s | every 0.5 s |
-| LLM tips | 6 s timeout, urgent tips use the card wording | the coach waits for the LLM, and it writes every tip, urgent ones too |
-
-Tips for the recording: film like a webcam (face fills a good part of the frame; a far-away face is not found),
-talk at least a minute (the first 30 s of speech calibrate the coach to you), and start Ollama before running.
-The video is not mirrored (`--mirror` to mirror it). Useful options: `--no-landmarks` (no face dots),
-`--volume 0.3` (quieter sound effects), `--no-sound`, `--duration 60` (only the first minute),
-`--whisper-model medium`, `--language fr`, `--tip-language fr`. Download the bigger Whisper beforehand with
-`python setup_models.py --whisper-model large-v3-turbo`, or let the first video run do it.
-
 ## Retro look and sounds
 
-The camera window is drawn like an old handheld RPG: a pixelated webcam image with fewer colours, chunky
+The camera window is drawn like an old handheld RPG around your normal (mirrored) webcam image: chunky
 brackets around your face, a status screen with HP-style bars, and the tip in a dialog box that types itself
 out. Everything is drawn in code (`coach/pixelfont.py` is a small hand-made pixel font that also does French
 accents), and every sound is synthesised from square and triangle waves in `coach/sfx.py`, so nothing is downloaded.
@@ -171,7 +112,6 @@ loud in a few words, so you don't have to look at the screen and lose eye contac
 voices (`pip install pyttsx3`; without it, Windows PowerShell's voice), in its own thread, after the tip sound.
 While it talks the mic analysis ignores the audio, so the coach's voice never counts as yours (no fake pace,
 fillers, stress or "you froze"), and the sound effects get quieter. Use headphones so it doesn't reach the mic.
-With `--tip-language fr` it picks a French voice if Windows has one.
 
 **When it speaks.** At most one tip every 25 s, never while the last tip is still being checked (a freeze may
 interrupt). The most important active problem wins.
@@ -194,7 +134,7 @@ stopped. The panel's FILLERS and PACE numbers restart too. Stress, eye contact a
 windows of 3-5 s, so they need no restart. While a spoken tip plays (`--speak`) the mic is off; that time is left
 out of fillers per minute and pace, so it doesn't look like "no fillers" or "slower".
 
-**Timing rules** (each one checked in `test_coach.py`):
+**Timing rules:**
 - An urgent moment (freeze, panic...) does not wait for a normal tip that the LLM is still writing: that tip is
   dropped and the urgent one is shown at once.
 - If the problem stops while the LLM is writing, the tip is dropped instead of showing up late.
@@ -221,15 +161,13 @@ searched too, and given to the LLM as extra context.
 **LLM** (`coach/recommend/writer.py`). It only *rewords* the chosen card for this moment, in at most 10 words plus
 a "why" that quotes your evidence. It never picks the strategy and never makes up the source, which always
 comes from the card. If it takes longer than 6 s or returns something unusable, the card's own wording is used.
-- **Ollama (default, free, offline, runs on your GPU):** install from https://ollama.com, then
-  `ollama pull qwen2.5:3b` (about 2 GB, also good in French). Change it with `--ollama-model`.
-- **Claude API:** `pip install anthropic`, set `ANTHROPIC_API_KEY`, run with `--llm claude`.
-- **None:** `--llm template` uses the card wording. It's instant and fine for testing.
+The coach tries these in order, and a red line tells you which one was missing:
+- **Ollama (free, offline, runs on your GPU):** install from https://ollama.com, then
+  `ollama pull qwen2.5:3b` (about 2 GB, also good in French).
+- **Claude API:** `pip install anthropic` and set `ANTHROPIC_API_KEY`.
+- **None:** the card's own wording. Instant, always available.
 
-With `--llm auto` the coach tries Ollama, then Claude, then card wording, and a red line tells you which one
-was missing.
-
-**Events for the game.** Everything is a JSON line with a `type`. `--json` prints them and every session log has them:
+**Events for the game.** Everything is a JSON line with a `type`, and every session log has them:
 
 | type | key fields |
 | --- | --- |
@@ -241,9 +179,6 @@ was missing.
 | `progress` | `kind` (`recovered` / `improving`), `text`, `why`, and `pattern` + `strategy` or `signal` |
 
 A game can turn `tip_result.worked` and `praise` into points and streaks, and `level` into urgency.
-
-**Check it without hardware:** `python test_coach.py` runs the coach on made-up snapshots in a few seconds and
-prints every tip, its why and the result (calm talk, stress that goes away, stress that stays and escalates).
 
 ## What each score is made of
 
@@ -277,20 +212,16 @@ coach/overlay.py    camera window (OpenCV), retro style: feed, face brackets, st
 coach/pixelfont.py  hand-made pixel font for the window
 coach/sfx.py        retro sound effects, synthesised in code, and the little mixer that plays them
 coach/juice.py      game feel: events -> sounds, XP, pop-ups, flashes (display only)
-coach/display.py    terminal dashboard (--terminal)
-coach/offline.py    video mode (--video x --out y): the whole pipeline on a recording -> annotated MP4
 coach/speaker.py    spoken tips (--speak / v): offline text-to-speech, mutes the mic analysis while talking
 coach/recommend/    the coach: patterns.py, urgent.py (fast lane), more_patterns.py (face+voice, over time),
                     progress.py (good news), knowledge.py (BM25 + strategy names),
                     writer.py (LLM), coach.py (when/what/did it help)
 knowledge/          tip cards, sources, optional book chapters
-test_patterns.py    checks the new patterns on made-up snapshots
-test_coach.py       checks tips, IT WORKED and escalation on made-up snapshots
 ```
 
 ## Known limits
 
-- Built and checked in a cloud machine without a webcam, microphone or GPU. The dashboard, MediaPipe,
+- Built and checked in a cloud machine without a webcam, microphone or GPU. MediaPipe,
   Silero VAD, the pitch code and the audEERING model wiring all ran there. The real HSEmotion, audEERING and Whisper
   weights could not be downloaded there, so the first real run on your laptop is the real test.
 - faster-whisper on GPU needs CUDA 12 and cuDNN 9 libraries. If it errors, try `--whisper-model base` or set
@@ -301,7 +232,6 @@ test_coach.py       checks tips, IT WORKED and escalation on made-up snapshots
   is to sometimes stay silent on purpose and use that as a baseline.
 - The tip cards are short paraphrases written for this project. Check a reference in `knowledge/sources.md`
   before quoting it in your report.
-- The sound effects were checked as data (and exported to .wav) but could not be listened to on the cloud machine,
-  which has no speakers. Run `python -m coach.sfx` once to hear them all.
+- The sound effects were checked as data but could not be listened to on the cloud machine, which has no speakers.
 - Lab emotion models see a nervous presenter mostly as "neutral". That's why stress and confidence mix several cues
   instead of trusting one label.

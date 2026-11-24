@@ -166,19 +166,6 @@ class GroundingDINODiagramEvaluator:
             return self.puzzles_list
         return [p for p in self.puzzles_list if int(p["concept_id"]) == int(concept_id)]
 
-    SHAPE_PROMPTS = [
-        "a rectangular diagram block",
-        "a colored rectangular box",
-        "a grey cylinder",
-        "a database cylinder",
-        "an oval",
-        "an ellipse",
-        "a cloud shape",
-        "a table row",
-        "a table cell",
-        "a text box",
-    ]
-
     def detect_boxes(
         self,
         img: Image.Image,
@@ -235,98 +222,11 @@ class GroundingDINODiagramEvaluator:
         raw_scores = [float(s) for s in results["scores"].detach().cpu().tolist()]
         return raw_boxes, raw_scores, latency_ms
 
-    def generate_shape_candidates(
-        self,
-        img: Image.Image,
-        threshold: float = 0.11,
-        iou_dedup: float = 0.82,
-        max_candidates: int = 36,
-    ) -> list:
-        """
-        High-recall pure-shape region proposal generator for Set-of-Mark (SoM) grounding:
-          - Queries `LLMDet-Large` (or `Grounding-DINO`) ONLY for visual shapes
-            (boxes, cylinders, ovals, clouds, table rows/cells — zero French text burden!).
-          - Preserves nested boxes (e.g. `Cache de tampons` inside `Mémoire SGA`) by only
-            deduplicating near-identical boxes (`IoU >= 0.82`) and dropping giant outer
-            page frames (`area > 62%` of image).
-          - Returns candidates sorted in clean reading order `(top-to-bottom, left-to-right)`
-            with 1-based `"id"`.
-        """
-        rgb = img.convert("RGB")
-        W, H = rgb.size
-        img_area = float(max(1, W * H))
-
-        if self._is_llmdet:
-            inputs = self.processor(
-                images=rgb,
-                text=[list(self.SHAPE_PROMPTS)],
-                return_tensors="pt",
-            ).to(self.device)
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-            res = self.processor.post_process_grounded_object_detection(
-                outputs=outputs,
-                threshold=float(threshold),
-                target_sizes=[(H, W)],
-            )[0]
-        else:
-            joined = ". ".join(self.SHAPE_PROMPTS) + "."
-            inputs = self.processor(
-                images=rgb,
-                text=joined,
-                return_tensors="pt",
-            ).to(self.device)
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-            res = self.processor.post_process_grounded_object_detection(
-                outputs,
-                inputs.input_ids,
-                threshold=float(threshold),
-                text_threshold=0.09,
-                target_sizes=[(H, W)],
-            )[0]
-
-        raw_boxes = res["boxes"].detach().cpu().tolist()
-        raw_scores = [float(s) for s in res["scores"].detach().cpu().tolist()]
-        if not raw_boxes:
-            return []
-
-        # Sort by score descending for non-destructive greedy deduplication
-        paired = sorted(zip(raw_boxes, raw_scores), key=lambda x: x[1], reverse=True)
-        kept = []
-        for b, sc in paired:
-            x1 = max(0.0, min(float(W), float(b[0])))
-            y1 = max(0.0, min(float(H), float(b[1])))
-            x2 = max(0.0, min(float(W), float(b[2])))
-            y2 = max(0.0, min(float(H), float(b[3])))
-            if x2 < x1:
-                x1, x2 = x2, x1
-            if y2 < y1:
-                y1, y2 = y2, y1
-            bw, bh = x2 - x1, y2 - y1
-            if bw < 16.0 or bh < 12.0:
-                continue
-            if (bw * bh) > 0.62 * img_area:
-                continue
-            cbox = [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)]
-            if any(compute_iou(cbox, prev["bbox"]) >= iou_dedup for prev in kept):
-                continue
-            kept.append({"bbox": cbox, "score": round(sc, 4)})
-            if len(kept) >= max_candidates:
-                break
-
-        # Reading order sort: group coarsely by vertical band, then left-to-right
-        band_h = max(18.0, H * 0.06)
-        kept.sort(key=lambda c: (int(c["bbox"][1] // band_h), c["bbox"][0]))
-        for idx, item in enumerate(kept):
-            item["id"] = idx + 1
-        return kept
-
     def ground_puzzle(self, puzzle_id: str, force_live: bool = False) -> dict:
         """
         Runs LLMDet-Large / Grounding DINO zero-shot open-vocabulary detection on the
-        puzzle's course diagram (or returns the already native-res SoM + Crop-Verified
-        box directly when `som_verified=True`).
+        puzzle's course diagram and aligns the best neural candidate box with the
+        diagram's structural component layout.
         """
         if not force_live and puzzle_id in self._grounding_cache:
             return self._grounding_cache[puzzle_id]
@@ -335,27 +235,9 @@ class GroundingDINODiagramEvaluator:
             raise KeyError(f"Unknown diagram puzzle_id: {puzzle_id}")
 
         p = self.puzzles[puzzle_id]
-        target_box = [round(float(v), 1) for v in p["target_box"]]
-        prompt = p.get("dino_prompt", p["target_label"].lower() + ".")
-
-        if p.get("som_verified") and not force_live:
-            out = {
-                "puzzle_id": puzzle_id,
-                "concept_id": p["concept_id"],
-                "target_label": p["target_label"],
-                "dino_prompt": prompt,
-                "grounded_box": target_box,
-                "target_box": target_box,
-                "dino_raw_box": target_box,
-                "dino_confidence": round(float(p.get("som_confidence", 0.92)), 4),
-                "dino_num_candidates": int(p.get("som_num_candidates", 1)),
-                "dino_latency_ms": 0.2,
-            }
-            self._grounding_cache[puzzle_id] = out
-            return out
-
         img_path = os.path.join(REPO_ROOT, p["diagram_file"])
         img = Image.open(img_path).convert("RGB")
+        prompt = p.get("dino_prompt", p["target_label"].lower() + ".")
         if not prompt.strip().endswith("."):
             prompt = prompt.strip() + "."
 

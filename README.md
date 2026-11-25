@@ -1,246 +1,322 @@
-# Adaptive E-Learning RPG — Intelligent Tutoring Platform
+# Adaptive E-Learning RPG — 7-Model Intelligent Tutoring Platform
 
-An AI-powered adaptive educational RPG developed in vanilla HTML5/Canvas/JavaScript paired with a local, multi-model PyTorch AI backend. The platform transforms academic course material into an interactive retro adventure where learning occurs through exploration, adaptive turn-based battles, and interactive visual investigations.
+An AI-powered adaptive educational RPG built in **vanilla HTML5 / Canvas / JavaScript** (zero build tools) paired with a **7-model PyTorch Deep Learning backend**. The platform transforms arbitrary academic courses—including live uploaded `.pdf`, `.pptx`, and `.docx` documents—into an interactive GBA-style monster-catching adventure with grounded diagram puzzles, adaptive turn-based quiz battles, and **14 unique interactive LLM NPCs**.
 
-The system operates **100% locally with zero webcam surveillance**, preserving full learner privacy (GDPR/FERPA compliant) by modeling cognitive mastery, memory decay, and engagement strictly through in-game behavioral telemetry.
+The platform runs **100% privacy-first with zero webcam or microphone surveillance** (GDPR/FERPA compliant), inferring cognitive mastery, memory decay, and affective states (focus, frustration, boredom) strictly from in-game behavioral telemetry and running locally or on Kaggle `2× Tesla T4` GPUs.
 
 ---
 
-## 1. End-to-End System Architecture
-
-The platform connects upstream course material (notes, textbook summaries, and audio lectures) to a closed-loop, multi-tier AI game engine:
+## 1. End-to-End 7-Model System Architecture
 
 ```mermaid
 flowchart TD
-    %% UPSTREAM
-    subgraph UPSTREAM ["Upstream Input: Educational Content (Dynamic Course Package)"]
-        Notes["Course Syllabus & Structured Summary Notes"]
-        Audio["Lecture / Podcast Audio (.wav / .mp3) + Transcript"]
+    %% UPSTREAM INPUTS
+    subgraph UPSTREAM ["Upstream Inputs: Built-In & User-Uploaded Course Material"]
+        Docs["Uploaded .pdf / .pptx / .docx\n(or Structured course_curriculum.json)"]
+        Audio["Course Podcast & Summary Clips\n(.wav / .mp3 Audio + Notes)"]
     end
 
-    %% STAGE 1: INGESTION & TOPOLOGY
-    subgraph STAGE1 ["Stage 1: Curriculum Topology & Speech Alignment"]
-        KG["Model 1: Knowledge Graph Engine (Symbolic DAG)\n• Extracts prerequisite concept graph (DAG)\n• Maps syllabus dependencies to game world geography"]
-        FA["Model 2: Audio Forced-Aligner (WhisperX / wav2vec2)\n• Aligns transcript to millisecond timestamps\n• Slices audio into in-game 'Research Voice Logs'"]
+    %% STAGE 1: MULTIMODAL COURSE INGESTION
+    subgraph STAGE1 ["Stage 1: Multimodal Course Ingestion & Visual Grounding"]
+        VLM["Model #5: Multimodal VLM (Qwen3-VL-8B-Instruct)\n• Chapter-balanced visual diagram extraction\n• Conceptual non-spoiler Lab Monitor challenges\n• Verified box crops & OCR-clean region labels"]
+        DINO["Model #4: Grounded Vision Detector (LLMDet-Large / Grounding-DINO-Tiny)\n• Zero-shot open-vocabulary schematic localization\n• Grades player click coordinates & dragged box IoU"]
     end
 
-    %% STAGE 2: IN-GAME VISION & TELEMETRY
-    subgraph STAGE2 ["Stage 2: Privacy-First In-Game Perception (Zero Webcam)"]
-        Diagrams["In-Game Laboratory Monitors & Technical Schematics"]
-        GDINO["Model 3: Grounding DINO (Open-Vocabulary ViT)\n• Evaluates student clicks & dragged bounding boxes\n• Zero-shot component grounding on course schematics"]
-        Telemetry["Behavioral Interaction Telemetry\n• Response latency, hesitation bands, and retry dynamics"]
+    %% STAGE 2: COGNITIVE BRAIN & RL GAME MASTER
+    subgraph STAGE2 ["Stage 2: Privacy-First Cognitive Brain (Telemetry Only)"]
+        Telemetry["Behavioral Interaction Telemetry\n• Log response latency, rapid-guess/flow/struggle bands\n• Retry streaks, hint usage & answer format"]
+        DKT["Model #1: Knowledge Tracer (Final-DKT-GRU)\n• Tracks latent concept mastery P(Mastery)\n• Models Ebbinghaus memory decay & rapid-guess filtering"]
+        RL["Model #2: Pedagogical Game Master (Dueling Double-DQN)\n• Flow-Theory Dynamic Difficulty Adjustment in <1ms\n• Selects optimal intervention [0..4] (Hint, Quiz, Boss)"]
     end
 
-    %% STAGE 3: THE ADAPTIVE COGNITIVE BRAIN
-    subgraph STAGE3 ["Stage 3: The Adaptive Cognitive Brain (Custom Trained)"]
-        DKT["Model 4: Deep Knowledge Tracing (Final-DKT-GRU)\n• Tracks multi-concept mastery vector P(Mastery)\n• Models Ebbinghaus spaced-repetition forgetting curves"]
-        RL["Model 5: Adaptive Game Master (Dueling Double-DQN)\n• Dynamic Difficulty Adjustment (DDA) under Flow Theory\n• Selects optimal encounter type [0..4] in <1ms"]
+    %% STAGE 3: MULTI-AGENT LLM ORCHESTRATION
+    subgraph STAGE3 ["Stage 3: Stage-4 LLM Orchestrator (Multi-GPU / Async Prefetch)"]
+        Reasoner["Model #6: Pedagogical Reasoner (DeepSeek-R1-Distill-Qwen-7B)\n• Grounded EN/FR MCQs, distractors & Socratic hints\n• Concept Q&A with course-context retrieval & rubric synthesis"]
+        Stylist["Model #7: Persona Stylizer (Meta-Llama-3.1-8B-Instruct + QLoRA)\n• Hybrid Adapter: QLoRA (<=136-char GBA banter & briefings)\n• Base Adapter Off: 14 unique NPC chats & PDF RPG storyline"]
     end
 
-    %% STAGE 4: MULTI-AGENT LLM CONTENT GENERATION
-    subgraph STAGE4 ["Stage 4: Distributed Multi-Agent LLM Generation (Kaggle GPUs)"]
-        Reasoner["Model 6: Pedagogical Reasoner LLM (DeepSeek-R1 / Qwen2.5)\n• Extracts core competencies, verified questions, and distractors\n• Guarantees zero academic hallucination"]
-        Stylist["Model 7: Persona & Narrative Stylizer LLM (Llama-3.1-8B QLoRA)\n• Injects witty, sarcastic dialogue matching retro RPG character boxes"]
-    end
-
-    %% STAGE 5: EVALUATION & GAMEPLAY
-    subgraph STAGE5 ["Stage 5: Real-Time Battle Evaluation & Game Engine"]
-        FastEval["Model 8: Semantic Answer Evaluator (DeBERTa-v3-Small)\n• Instant free-text grading (<15ms on CPU / <10ms on GPU)\n• Computes RPG attack damage and critical strikes"]
-        Game["Browser RPG Engine (HTML5 Canvas / GBA-Style Experience)"]
+    %% STAGE 4: EVALUATION & GAME ENGINE
+    subgraph STAGE4 ["Stage 4: Real-Time Grading & Browser RPG Engine"]
+        Grader["Model #3: Semantic Answer Evaluator (DeBERTa-v3-Small)\n• Real-time free-text & open-boss equivalence grading\n• Adversarial negation/swap resistance (PAWS)"]
+        Game["HTML5 Canvas RPG Engine (server.py / kaggle_run_game.py)\n• Overworld exploration, Lab Monitor & Field Journal\n• Turn-based battles & 14 interactive NPC chat tutors"]
         Player((Student Player))
     end
 
-    Notes --> KG
-    Audio --> FA
-    KG -->|"World map zones & barriers"| Game
-    FA -->|"Timestamped audio clues"| Game
-    Game --> Diagrams
-    Player -->|"Clicks schematic component"| GDINO
-    GDINO -->|"IoU alignment & score"| DKT
-    Player -->|"Explores, battles & answers"| Game
+    Docs -->|"POST /api/course/ingest"| VLM
+    Docs --> Reasoner
+    Audio --> Game
+    VLM -->|"Grounded schemas & Lab puzzles"| DINO
+    VLM -->|"Extracted syllabus concepts & story"| Reasoner
+    Player -->|"Clicks/drags target on Lab Monitor"| DINO
+    DINO -->|"IoU score & verdict"| DKT
+    Player -->|"Explores, talks to NPCs & battles"| Game
     Game --> Telemetry
     Telemetry --> DKT
     Telemetry --> RL
-    DKT -->|"Mastery & memory decay"| RL
-    KG -->|"Prerequisite hierarchy"| RL
-    RL -->|"Target concept & difficulty tier"| Reasoner
-    Reasoner -->|"Verified pedagogical JSON"| Stylist
-    Stylist -->|"RPG battle dialogue & NPC banter"| Game
-    Game -->|"Typed explanation"| FastEval
-    FastEval -->|"Damage multiplier [0..1]"| Game
-    FastEval -->|"Updates mastery state"| DKT
+    DKT -->|"Mastery vector & forgetting decay"| RL
+    RL -->|"Action [0..4] & target concept"| Reasoner
+    Reasoner -->|"Verified JSON / Course facts"| Stylist
+    Stylist -->|"Persona banter, story & NPC replies"| Game
+    Game -->|"Open-text explanation"| Grader
+    Grader -->|"Score -> Critical / Partial / Fizzle"| Game
+    Grader -->|"Graded outcome"| DKT
 ```
 
 ---
 
-## 2. Model Overview & Benchmark Results
+## 2. Model Overview & Empirical Benchmark Results
 
-The platform deploys specialized machine learning models chosen through empirical benchmarking rather than generic wrappers:
+Every component in the pipeline is benchmarked individually and end-to-end rather than relying on unverified prompts:
 
-### Model 1: Cognitive Knowledge Tracer (`Final-DKT-GRU`)
-* **Role**: Tracks latent concept mastery over time and predicts memory decay to trigger spaced-repetition encounters before concepts are forgotten.
-* **Architecture**: 2-layer Context-Aware LayerNorm GRU (`hidden_dim = 128`, `dropout = 0.25`) with a 13-dimensional behavioral telemetry encoder (log latency, rapid-guess `<5s`, flow `5-15s`, deliberate `15-60s`, struggle `>60s`, retry counts, scaffold usage, answer format) and dual concept-fusion prediction heads.
+### Model #1: Cognitive Knowledge Tracer (`Final-DKT-GRU`)
+* **Role**: Tracks latent mastery per syllabus concept and models Ebbinghaus-style memory decay to schedule spaced-repetition encounters.
+* **Architecture**: 2-layer Context-Aware LayerNorm GRU (`hidden_dim = 128`, `dropout = 0.25`, `582,913` parameters) with a 13-dimensional behavioral telemetry encoder (log latency, rapid-guess `<5s`, flow `5–15s`, deliberate `15–60s`, struggle `>60s`, retry counts, scaffold usage, format).
 * **Trained On**: ASSISTments Benchmark (`432,928` clean interaction sequences across `123` skills).
-* **Benchmark Results**:
-  * **Test ROC-AUC**: **`0.7996`** (outperforming baseline `DKT-LSTM` at `0.7732` and standard `DKT-GRU` at `0.7754`).
+* **Benchmark Results** (`Models/DKT/results/models_summary.csv`):
+  * **Test ROC-AUC**: **`0.7996`** (outperforming `DKT-LSTM` at `0.7732` and standard `DKT-GRU` at `0.7754`).
   * **Test Accuracy**: **`74.43%`**.
-  * **Anti-Guessing Calibration**: Distinguishes rapid lucky guesses (`61.0%` mastery update) from deliberate, reasoned answers (`85.3%`).
+  * **Anti-Guessing Calibration**: Distinguishes rapid lucky guesses (`61.0%` mastery update) from deliberate reasoned answers (`85.3%`).
   * **Inference Speed**: **`2.37 ms`** on CPU.
 
-### Model 2: Pedagogical Game Master (`Dueling Double-DQN`)
-* **Role**: Dynamic Difficulty Adjustment (DDA). Reads the student's cognitive state and behavioral affect to choose the optimal learning intervention according to Csikszentmihalyi's Flow Theory.
-* **Architecture**: Dueling Deep Q-Network separating State Value $V(s)$ and Advantage $A(s, a)$ streams over a 12-dimensional student state space (target mastery, prerequisite deficit, fail streak, win streak, frustration, boredom, overall mastery, turn progress, concept context).
-* **Action Space**:
-  * `[0]` Audio Hint + Scaffolded Quiz (rescues frustrated/tilted learners).
-  * `[1]` Easy Recall Wild Encounter (builds early confidence).
+### Model #2: Pedagogical Game Master (`Dueling Double-DQN`)
+* **Role**: Dynamic Difficulty Adjustment (DDA) grounded in Csikszentmihalyi's Flow Theory.
+* **Architecture**: Dueling Deep Q-Network (`35,590` parameters) separating State Value $V(s)$ and Advantage $A(s,a)$ over a 12-dimensional student cognitive/affective state vector.
+* **Action Space (`[0..4]`)**:
+  * `[0]` Audio Hint + Scaffolded Quiz (rescues frustrated or stalled learners).
+  * `[1]` Easy Recall Wild Encounter (builds baseline confidence).
   * `[2]` Medium Flow Trainer Battle (sustains optimal challenge).
   * `[3]` Prerequisite Review Battle (remediates foundation gaps).
-  * `[4]` Hard Open-Text Boss Synthesis Challenge (unlocks concept badges).
-* **Calibrated On**: **`6,123,270` rows (`2.80 GB`)** of empirical student affective interaction logs.
+  * `[4]` Hard Open-Text Boss Synthesis Challenge (awards Concept Mastery Stars).
+* **Calibrated On**: **`6,123,270` rows (`2.80 GB`)** of empirical student affective interaction logs (`Models/RL/results/rl_models_summary.csv`).
 * **Benchmark Results**:
-  * **Mean Evaluation Reward**: **`+19.23`** (outperforming random policy at `13.41`, static medium at `18.80`, standard DQN at `18.42`, and PPO at `18.91`).
-  * **Affective Metrics**: Highest student focus (**`85.54%`**), lowest frustration (**`29.28%`**), and lowest boredom (**`11.90%`**).
+  * **Mean Evaluation Reward**: **`+19.23`** (`19.2348`, outperforming Random at `13.41`, Static Medium at `18.80`, Final-Double-DQN at `18.42`, and PPO-ActorCritic at `18.91`).
+  * **Affective Metrics**: Highest learner concentration (**`85.54%`**), lowest frustration (**`29.28%`**), and lowest boredom (**`11.90%`**).
   * **Decision Speed**: **`0.258 ms`** on CPU.
 
-### Model 3: Semantic Answer Evaluator (`DeBERTa-v3-Small`)
-* **Role**: Evaluates open-ended, free-text student explanations during boss encounters and tactical attacks, scoring conceptual equivalence against reference summaries in real time.
-* **Architecture**: Cross-Encoder transformer (`microsoft/deberta-v3-small`, `142.5M` parameters) with a 3-way classification head (`correct`, `partial`, `incorrect`) and continuous score calibration.
-* **Trained On**: Master dataset of **`99,631` pairs** unifying classroom student answers (`SciEntsBank`, `Beetle`), natural language inference (`MultiNLI`), semantic similarity (`STS-B`), and adversarial word swaps (`Google PAWS`).
-* **Benchmark Results**:
-  * **3-Way Accuracy**: **`79.84%`** (vs. keyword overlap baseline at `39.95%` and MiniLM at `77.17%`).
+### Model #3: Semantic Answer Evaluator (`DeBERTa-v3-Small`)
+* **Role**: Grades open-ended student explanations submitted during tactical attacks (`[T] Own Words`) and Boss Synthesis encounters (`Action [4]`).
+* **Architecture**: Cross-Encoder (`microsoft/deberta-v3-small`, `142,490,884` / `142.5M` parameters) outputting 3-way probabilities (`correct`, `partial`, `incorrect`) and continuous semantic equivalence scores.
+* **Trained On**: **`99,631` pairs** across `SciEntsBank`, `Beetle`, `MultiNLI`, `STS-B`, and adversarial `Google PAWS`.
+* **Benchmark Results** (`Models/AnswerEvaluator/results/grader_models_summary.csv`):
+  * **3-Way Accuracy**: **`79.84%`** (vs. keyword overlap baseline at `39.95%` and `MiniLM-L12-H384` at `77.17%`).
   * **Binary ROC-AUC**: **`0.9241`**.
-  * **Adversarial PAWS Trap Accuracy**: **`93.61%`** (resists negation tricks and inverted cause-effect traps where word overlap exceeds 90%).
+  * **Adversarial PAWS Trap Accuracy**: **`93.61%`** (resists negation flips and inverted cause-effect phrasing).
   * **Latency**: **`10.2 ms`** on GPU / **`<25 ms`** on CPU.
 
-### Model 4: In-Game Diagram Vision Evaluator (`Grounding DINO Tiny`)
-* **Role**: Evaluates interactive visual investigations on laboratory monitors and technical schematics without requiring camera access.
-* **Architecture**: Open-Vocabulary Vision Transformer (`IDEA-Research/grounding-dino-tiny`, `172.3M` parameters) running zero-shot grounded object detection on course diagrams.
-* **Benchmark Results**:
-  * **Audit Success**: **`30/30` scenarios passed (`100.0%`)** across click precision, dragged bounding-box IoU, and distractor rejection.
-  * **Mean Dragged-Box IoU**: **`0.894`**.
-  * **Latency**: **`522 ms`** on CUDA.
+### Model #4: In-Game Diagram Vision Evaluator (`LLMDet-Large` / `Grounding-DINO-Tiny`)
+* **Role**: Grades interactive visual inspections on the Laboratory Calibration Terminal (`Lab Monitor`) from student mouse clicks or dragged bounding boxes.
+* **Architecture**:
+  * **Kaggle / `>=10 GB` VRAM**: Auto-loads `iSEE-Laboratory/llmdet_large` (`343,055,703` params, CVPR 2025 Swin-Large) with automatic fallback to `IDEA-Research/grounding-dino-base` → `IDEA-Research/grounding-dino-tiny`.
+  * **Local 4 GB GPU / CPU**: Loads `IDEA-Research/grounding-dino-tiny` (`172,250,626` params) offline from `Models/GroundingDINO/checkpoints/`.
+  * Includes dot-free label sanitization (`sanitize_dino_labels()` for `MMGroundingDinoProcessor`) and multi-occurrence `valid_boxes` IoU scoring (`iou >= 0.35`, or center-inside box with `iou >= 0.18`).
+* **Benchmark Results** (`Models/GroundingDINO/results/grounding_dino_summary.csv`):
+  * **Audit Scenarios**: **`30/30` expected verdicts (`100.0%`)** across `10` technical diagram puzzles × `3` test cases (center click, dragged bounding box, distractor click).
+  * **Mean Dragged-Box IoU**: **`0.894`** (range `0.8322–0.9220`).
+  * **Mean CUDA Latency**: **`523 ms`** (range `517.83–526.95 ms`).
+
+### Model #5: Multimodal Course & Diagram VLM (`Qwen/Qwen3-VL-8B-Instruct`)
+* **Role**: Powers live `.pdf` / `.pptx` / `.docx` ingestion (`custom_course_ingestor.py`), high-resolution schematic grounding, non-spoiler Lab Monitor challenge generation (`_question_leaks_label()` anti-leak filter), and VLM-verified bounding-box refinement (`verify_box_contains_label_live()`).
+* **Architecture & Precision**:
+  * Loaded on Kaggle in **4-bit NF4** for the language backbone with **FP16 vision & merger layers** (`llm_int8_skip_modules=["visual", "model.visual", "merger", "deepstack_merger_list", "multi_modal_projector", "lm_head"]`), pinned to **`cuda:1`** (`5,294,239,984` packed parameters).
+  * Fallback chain: `Qwen/Qwen3-VL-8B-Instruct` → `Qwen/Qwen2.5-VL-7B-Instruct` → `Qwen/Qwen2-VL-7B-Instruct`.
+  * Local PCs automatically run `mode="hybrid"`, serving pre-extracted diagram caches (`Models/VLM/data/vlm_extracted_diagrams.json`).
+* **Benchmark Results** (`Models/VLM/results/vlm_benchmark_summary.csv`, `10` diagram components `c0_p1`..`c4_p2`):
+  * **Mean Standalone VLM IoU**: **`0.979`** (range `0.9671–0.9848`).
+  * **Mean Fused VLM + DINO IoU**: **`0.993`** (range `0.9834–0.9963`).
+  * **Mean DeBERTa VQA Verification Gap**: Correct VQA score **`0.988`** vs. Distractor Trap **`0.008`** (**`0.980`** mean separation gap, range `0.9708–0.9845`).
+
+### Model #6: Pedagogical Reasoner LLM (`DeepSeek-R1-Distill-Qwen-7B`)
+* **Role**: Generates course-grounded multiple-choice questions (`4` unique choices + shuffled `correct_idx`), Socratic hints, Open-Text Boss Synthesis rubrics, and retrieval-grounded answers (`answer_course_question()`) when players ask NPCs about uploaded or built-in course materials.
+* **Architecture**: `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` in **4-bit NF4** pinned to **`cuda:0`** (`4,352,972,288` packed parameters), with fallback to `Qwen/Qwen2.5-7B-Instruct` → `Qwen/Qwen2.5-3B-Instruct` → curriculum bank. Uses closed-`<think>` prefill (`max_new_tokens=340`), `strip_think_trace()`, strict JSON extraction, and bilingual EN/FR matching.
+* **Diagnostic Audit** (`evaluate_stage4_llms.py`, `10` cases across RL Tiers `0..4` EN/FR): **`70.0%`** strict JSON validity and `25.32s` mean latency on initial un-prefilled Kaggle audit (subsequently optimized via closed-`<think>` prefill to skip runaway chain-of-thought traces).
+
+### Model #7: Retro-GBA Persona Stylizer (`Meta-Llama-3.1-8B-Instruct` + QLoRA)
+* **Role**: Generates in-character RPG banter, Prof. Ada briefings, custom course opening storylines (`generate_course_story()`), and bilingual open-ended chat across all **14 unique town & gym NPCs**.
+* **Custom Fine-Tuning (`train_persona_qlora.py`)**:
+  * **Dataset (`build_persona_dataset.py`)**: `419` bilingual EN/FR examples (`311 train / 48 val / 60 test`), formatted with assistant-only loss masking so gradients update exclusively on persona responses.
+  * **LoRA Config**: `r = 16`, `alpha = 32`, NF4 4-bit base (`4,582,543,360` packed params), **`41,943,040` trainable parameters (`0.915%`)**, `3` epochs (`1606.7s` total on Kaggle T4).
+  * **Hybrid Adapter Runtime Switching (`_base_model_ctx()`)**: Keeps the trained QLoRA adapter active for strict JSON GBA battle banter (`<=136` chars) and Prof. Ada briefings, while dynamically disabling the adapter (`model.disable_adapter()`) for conversational 14-NPC Q&A (matching the user's EN/FR language via `_detect_user_language()`) and custom PDF storyline generation.
+
+#### Observed QLoRA Training Progression (Validation Set `n = 48`)
+
+| Stage | Train Loss | Val Loss | Val Perplexity (PPL) | Epoch Time |
+| :--- | :---: | :---: | :---: | :---: |
+| **Baseline (Pre-training)** | — | `2.3933` | `10.95` | — |
+| **Epoch 1** | `0.8423` | `0.1444` | `1.16` | `536.3s` |
+| **Epoch 2** | `0.0589` | `0.0414` | `1.04` | `533.3s` |
+| **Epoch 3 (Final)** | **`0.0281`** | **`0.0322`** | **`1.03` (-90.6%)** | `534.0s` |
+
+#### Observed Held-Out Test Comparison (`test = 60` PPL / `n = 24` Generative Audit)
+
+| Metric | Base `Meta-Llama-3.1-8B` | Fine-Tuned QLoRA (`r=16, alpha=32`) | Improvement |
+| :--- | :---: | :---: | :---: |
+| **Held-Out Test Loss** | `2.3804` | **`0.0400`** | **-98.3%** |
+| **Held-Out Test PPL** | `10.81` (`10.809`) | **`1.04`** (`1.041`) | **-90.4%** |
+| **Strict JSON Validity** | `91.67%` | **`100.0%`** | **+8.33 pts** |
+| **GBA Box Compliance (`<=136 chars`)** | `0.0%` | **`100.0%`** | **+100.0 pts** |
+| **Mean Generation Latency** | `5.43s` | `14.48s` | Budgeted via async prefetch |
+
+---
+
+### Kaggle `2× Tesla T4` Multi-GPU VRAM Placement
+
+When booted on Kaggle (`2 × 16 GB T4`), `server.py` / `kaggle_run_game.py` shards all 7 models simultaneously without OOM:
+
+| GPU Device | Assigned Models | Quantization / Precision | Packed / Active Params |
+| :--- | :--- | :--- | :---: |
+| **`cuda:0` (`~15 GiB`)** | `DeepSeek-R1-Distill-Qwen-7B` + `LLMDet-Large` + `Meta-Llama-3.1-8B` Shard 0 | 4-bit NF4 (`LLM`), FP32/FP16 (`DINO`) | `4.35B` + `343.1M` + Shard 0 |
+| **`cuda:1` (`~15 GiB`)** | `Qwen3-VL-8B-Instruct` + `Meta-Llama-3.1-8B` Shard 1 | 4-bit NF4 LLM + FP16 Vision Tower | `5.29B` + Shard 1 |
+| **`cuda` / `CPU`** | `Final-DKT-GRU`, `Dueling Double-DQN`, `DeBERTa-v3-Small` | FP32 PyTorch Checkpoints | `583K` + `35.6K` + `142.5M` |
+
+Interactive requests signal `_interactive_pending` in `Stage4LLMOrchestrator` so background `RL [0..4]` encounter prefetching immediately yields GPU compute to live player NPC chats.
 
 ---
 
 ## 3. Codebase Structure
 
-```
-.
-├── server.py                                # Local multi-model HTTP API server & static host
-├── index.html                               # Game entry point (runs via server or file://)
-├── validate.js                              # Data integrity gate (map bounds, collision, warps)
-├── extract_firered_battle_assets.py         # Deterministic GBA sprite & arena asset extractor
+```text
+DL-Interactive_L/
+├── index.html                           # Browser entry point & script dependency order
+├── server.py                            # Local HTTP server + full 7-model REST API (/api/*)
+├── kaggle_run_game.py                   # Turnkey Kaggle 2x T4 launcher + Cloudflare HTTPS tunnel
+├── validate.js                          # Frontend game & map data integrity check (Node.js)
+├── manifest.json / sw.js                # Progressive Web App manifest & offline service worker
+├── extract_firered_battle_assets.py     # Battle VFX & UI extraction utility
+├── download-assets.js                   # Fetches local battle & item PNG sprites
+├── download-overworld.js                # Fetches local RMXP tilesets & character walk sheets
 │
-├── js/                                      # Browser RPG Client Engine
-│   ├── main.js                              # Game loop, adaptive viewport scaling, PWA lifecycle
-│   ├── overworld.js                         # Tile engine, grid movement, 4-way LOS trainers, warps
-│   ├── battle.js                            # GBA combat engine, catch formula, particle animations
-│   ├── ui.js                                # GBA dialogue boxes, tactical selectors, Grounding DINO modal
-│   ├── ai_tutor.js                          # Client-side AI bridge & offline curriculum fallback
-│   ├── audio.js                             # Web Audio chiptune & battle SFX synthesis
-│   ├── save.js                              # LocalStorage slot & portable base64 save codes
-│   └── data/                                # Game registries (types, moves, species, maps, sprites)
+├── css/
+│   └── style.css                        # GBA bezels, adaptive battle/chat/ingest overlays
 │
-├── Models/                                  # Machine Learning Subsystems
-│   ├── DKT/                                 # Model #1: Deep Knowledge Tracing
-│   │   ├── checkpoints/                     # best_final_gru_model.pt, skill_mapping.json
-│   │   ├── scripts/                         # dataset.py, model.py, train_final_gru.py, test_final_gru.py
-│   │   ├── results/                         # models_summary.csv, training logs
-│   │   └── eda.py                           # ASSISTments forensic exploratory data analysis
-│   │
-│   ├── RL/                                  # Model #2: Pedagogical Game Master
-│   │   ├── checkpoints/                     # double_dqn_gamemaster.pt, ppo_gamemaster.pt
-│   │   ├── scripts/                         # student_env.py, models.py, train_final_dqn.py, test_rl_gamemaster.py
-│   │   ├── results/                         # rl_models_summary.csv, training logs
-│   │   └── eda_affective.py                 # Affective calibration & telemetry dynamics
-│   │
-│   ├── AnswerEvaluator/                     # Model #3: Semantic Answer Evaluator
-│   │   ├── checkpoints/                     # deberta_v3_grader.pt, tokenizers
-│   │   ├── scripts/                         # grader_dataset.py, grader_models.py, train_deberta.py, test_answer_grader.py
-│   │   ├── results/                         # grader_models_summary.csv, training logs
-│   │   ├── download_dataset.py              # Multi-domain benchmark fetcher & merger
-│   │   └── eda.py                           # Text length & semantic overlap analysis
-│   │
-│   ├── GroundingDINO/                       # Model #4: In-Game Diagram Vision Grounding
-│   │   ├── checkpoints/                     # Local grounding_dino_tiny weights
-│   │   ├── scripts/                         # dino_evaluator.py, generate_course_diagrams.py, test_grounding_dino.py
-│   │   ├── data/                            # diagram_puzzles.json
-│   │   └── results/                         # grounding_dino_summary.csv
-│   │
-│   ├── engine/                              # AI Integration Layer
-│   │   ├── knowledgequest_engine.py         # Master closed-loop orchestrator (<30ms/turn)
-│   │   └── curriculum_bank.py               # Prerequisite DAG & dynamic course loader
-│   │
-│   └── test_integrated_pipeline.py         # End-to-end multi-model integration test & terminal RPG
+├── js/                                  # Vanilla HTML5 RPG Engine
+│   ├── main.js                          # Title screen, 2x logical loop, adaptive viewport, custom story intro
+│   ├── overworld.js                     # Grid movement, LOS trainers, NPC_PERSONA_MAP (14 NPCs), start menu
+│   ├── battle.js                        # Gen-3 combat, catch math, status VFX, adaptive quiz integration
+│   ├── ui.js                            # Typewriter dialog, NPC Intel Chat modal, Lab Monitor, Field Journal
+│   ├── ai_tutor.js                      # Client bridge to /api/* + standalone offline JS tutor fallback
+│   ├── audio.js & save.js               # WebAudio chiptune synth + spoken clips + localStorage saves
+│   └── data/                            # Tile-string maps, species, moves, items, types, assets, fallback sprites
 │
-├── course_material/                         # Dynamic Course Packages
-│   └── generate_podcast_audio.py            # Local TTS generator for 15-second audio hint clips
+├── Models/                              # 7-Model AI Backend & Orchestration
+│   ├── engine/
+│   │   ├── knowledgequest_engine.py     # Closed-loop orchestrator (DKT -> RL -> Reasoner -> Stylist -> DeBERTa)
+│   │   └── curriculum_bank.py           # Built-in syllabus + dynamic ingested course loader
+│   ├── DKT/                             # Model #1: Final-DKT-GRU (train_final_gru.py, test_final_gru.py, ckpts)
+│   ├── RL/                              # Model #2: Dueling Double-DQN (train_dqn.py, student_env.py, ckpts)
+│   ├── AnswerEvaluator/                 # Model #3: DeBERTa-v3-Small grader (train_deberta.py, test_answer_grader.py)
+│   ├── GroundingDINO/                   # Model #4: LLMDet-Large / Grounding-DINO-Tiny (dino_evaluator.py, tests)
+│   ├── VLM/                             # Model #5: Qwen3-VL-8B engine + PDF/PPTX/DOCX ingestor + Kaggle runner
+│   ├── LLM/                             # Models #6 & #7: Reasoner, Persona Stylizer + QLoRA dataset/trainer/eval
+│   │   ├── data/build_persona_dataset.py
+│   │   ├── scripts/{pedagogical_reasoner.py,persona_stylizer.py,stage4_llm_orchestrator.py}
+│   │   └── scripts/{train_persona_qlora.py,evaluate_stage4_llms.py}
+│   └── test_integrated_pipeline.py      # Full-course closed-loop audit across Models #1, #2, and #3
 │
-└── assets/                                  # Local Game Graphics & Audio
-    ├── battle/                              # Arenas, sliding platforms, Red 5-frame throw, Poké Balls
-    ├── overworld/                           # Tilesets, building decals, character walk sheets
-    ├── sprites/                             # 64x64 creature front/back & shiny variants
-    └── fx/                                  # 35 move animation strips, stat waves, type badges
+└── course_material/                     # Course Packages & Audio
+    ├── generate_podcast_audio.py        # Synthesizes timestamped offline concept .wav clips
+    └── vision_yolo_ocr/                 # Default syllabus JSON + structured markdown notes
 ```
 
 ---
 
-## 4. Execution & Verification Guide
+## 4. Execution, QLoRA Training & Verification Guide
 
 ### Prerequisites
-* Windows, macOS, or Linux.
-* Python 3.10+ with CUDA support (CPU fallback is automatically supported).
-* Node.js (for asset downloads and validation checks).
+* Windows, macOS, or Linux (local lightweight mode) **OR** Kaggle Notebook (`GPU T4 x2`, `Internet: ON`, `Persistence: Files only`).
+* Python `3.10+` with CUDA support (CPU fallback is automatic for Models `#1–#4`).
+* Node.js (for `validate.js` and optional asset scripts).
+
+---
+
+### Option A: Local Execution (`<=4 GB` VRAM or CPU)
+
+Runs Models `#1–#4` locally (`Final-DKT-GRU`, `Dueling Double-DQN`, `DeBERTa-v3-Small`, `Grounding-DINO-Tiny`) with hybrid pre-extracted VLM diagrams and clean template/cached dialogue:
 
 ```powershell
-# 1. Clone repository and activate environment
+# 1. Clone and create virtual environment
 git clone https://github.com/zaabola/E-Learning.git -b interactive_learning_RPG
 cd E-Learning
 python -m venv .venv
 .\.venv\Scripts\activate
 
-# 2. Install dependencies
+# 2. Install local dependencies
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 pip install transformers datasets scikit-learn numpy pillow pyttsx3
-```
 
----
-
-### Running the Live Platform
-
-Launch the local server hosting the browser RPG and REST endpoints:
-
-```powershell
+# 3. Boot local server and open http://127.0.0.1:8000
 .\.venv\Scripts\python.exe server.py --open
 ```
 
-* The server initializes all local PyTorch checkpoints (`Final-DKT-GRU`, `Double-DQN`, `DeBERTa-v3-Small`, and `Grounding-DINO-Tiny`).
-* The game opens in your browser at `http://127.0.0.1:8000`.
-* **Offline Resilience**: The RPG can also be played standalone without starting `server.py` by opening `index.html` directly via `file://` — `js/ai_tutor.js` provides client-side rule evaluation.
+* **Offline Mode**: Opening `index.html` directly via `file://` still runs the full RPG using client-side rule evaluation inside `js/ai_tutor.js`.
 
 ---
 
-### Running Diagnostic & Verification Tests
+### Option B: Kaggle `2× Tesla T4` (All 7 Models + Live VLM + Dual 7B/8B LLMs)
 
-Every model and subsystem includes a standalone verification script:
+`kaggle_run_game.py` boots all 7 models across both T4 GPUs and prints an instant public `https://....trycloudflare.com` URL to play from your desktop browser:
+
+```bash
+# In a Kaggle GPU T4 x2 notebook cell (enable Notebook Options -> Persistence -> Files only):
+git clone https://github.com/zaabola/E-Learning.git -b interactive_learning_RPG || (cd /kaggle/working/E-Learning && git pull origin interactive_learning_RPG)
+cd /kaggle/working/E-Learning
+pip install -q -U pymupdf python-pptx python-docx accelerate bitsandbytes peft qwen-vl-utils transformers
+
+# Boot all 7 models + public Cloudflare HTTPS tunnel
+python kaggle_run_game.py
+```
+
+Useful flags for `kaggle_run_game.py` / `server.py`:
+* `--no-live-vlm`: Skip loading `Qwen3-VL-8B-Instruct` (use hybrid extracted diagrams).
+* `--no-live-llm`: Skip loading `DeepSeek-R1-7B` + `Llama-3.1-8B QLoRA`.
+* `--model`, `--reasoner-model`, `--stylizer-model`: Override any Hugging Face model ID.
+
+---
+
+### Option C: Training & Persisting the Stage-4 QLoRA Adapter
+
+To train `Meta-Llama-3.1-8B-Instruct` on the `419`-example retro-GBA dataset and persist weights across Kaggle kernel resets:
+
+```bash
+# 1. Train LoRA r=16, alpha=32 for 3 epochs (~27 min on Kaggle T4)
+python Models/LLM/scripts/train_persona_qlora.py --epochs 3 --lora-r 16 --lora-alpha 32
+
+# 2. Back up the trained LoRA adapter (41.9M params) so fresh sessions restore without retraining
+tar -czf /kaggle/working/llama31_rpg_qlora_ckpt.tar.gz -C Models/LLM/checkpoints llama31_rpg_stylizer_qlora
+
+# (On a fresh session, extract before launching kaggle_run_game.py:)
+mkdir -p Models/LLM/checkpoints
+tar -xzf /kaggle/working/llama31_rpg_qlora_ckpt.tar.gz -C Models/LLM/checkpoints
+
+# 3. Run held-out Base vs. QLoRA comparison + DeepSeek Reasoner JSON audit
+python Models/LLM/scripts/evaluate_stage4_llms.py --max-stylizer-samples 24
+```
+
+`server.py` and `kaggle_run_game.py` automatically attach `Models/LLM/checkpoints/llama31_rpg_stylizer_qlora` on startup when present.
+
+---
+
+### Diagnostic & Verification Commands
 
 ```powershell
-# 1. End-to-End Multi-Model Closed-Loop Pipeline Test
+# 1. End-to-End Closed-Loop Pipeline Audit (Models #1, #2, #3)
 .\.venv\Scripts\python.exe Models/test_integrated_pipeline.py --auto
 
-# 2. Model #1 (DKT) Behavioral Sanity & Mastery Simulator
+# 2. Model #1 (DKT) Behavioral & Forgetting Curve Diagnostics
 .\.venv\Scripts\python.exe Models/DKT/scripts/test_final_gru.py
 
-# 3. Model #2 (RL Game Master) Policy & Q-Value Diagnostics
+# 3. Model #2 (RL Game Master) Policy & Affective Diagnostics
 .\.venv\Scripts\python.exe Models/RL/scripts/test_rl_gamemaster.py
 
-# 4. Model #3 (Semantic Grader) Adversarial Negation & Trap Audit
+# 4. Model #3 (DeBERTa Grader) Adversarial PAWS & Negation Audit
 .\.venv\Scripts\python.exe Models/AnswerEvaluator/scripts/test_answer_grader.py --auto
 
 # 5. Model #4 (Grounding DINO) Diagram Puzzle IoU Benchmark
 .\.venv\Scripts\python.exe Models/GroundingDINO/scripts/test_grounding_dino.py
 
-# 6. Frontend Game Data Integrity Check
+# 6. Model #5 (VLM) Diagram Grounding Test (add --live on GPU)
+.\.venv\Scripts\python.exe Models/VLM/scripts/test_qwen_vl.py
+
+# 7. Frontend Map, Warp & Sprite Integrity Check
 node validate.js
 ```
 
@@ -250,53 +326,59 @@ node validate.js
 
 ### Controls
 
-| Key | Overworld Action | Battle Action |
+| Key | Overworld Action | Battle / Modal Action |
 | :--- | :--- | :--- |
 | **Arrows / WASD** | Move character (grid movement) | Navigate menus / select moves |
-| **Z / Space** | Confirm / talk / interact with consoles | Confirm move / advance dialogue |
-| **X / Esc / Backspace** | Cancel / close modal | Return to move select |
-| **Enter** | Open Start Menu | Confirm selection |
-| **T** | — | Switch from multiple-choice to **Open-Text Typing** |
-| **H** | — | Play **Spoken Podcast Audio Hint** |
-| **M** | Toggle chiptune sound & SFX | Toggle audio |
-| **F** | Toggle browser fullscreen | Toggle browser fullscreen |
+| **Z / Space** | Confirm / talk to NPCs / open Consoles | Confirm move / advance typewriter text |
+| **X / Esc / Backspace** | Cancel / close modal | Return to move select / exit modal |
+| **Enter** | Open Start Menu (`JOURNAL`, `DINO LAB`, `NEW COURSE`, `PARTY`, `BAG`, `BADGES`, `SAVE`, `EXIT`) | Confirm selection |
+| **T** | — | Switch MCQ moves to **Open-Text Explanation (`DeBERTa-v3`)** |
+| **H** | — | Play **Spoken Podcast / Socratic Hint** |
+| **M** | Toggle WebAudio chiptune BGM & SFX | Toggle audio |
+| **F** | Toggle fullscreen | Toggle fullscreen |
 
-* **Mobile Support**: On touch devices (coarse pointer, landscape orientation), an in-game semi-transparent D-pad, A/B buttons, and a START pill overlay appear automatically.
+* **Mobile Support**: On touch devices (coarse pointer, landscape), an adaptive virtual D-pad, `A`/`B` buttons, and `START` button appear automatically.
 
 ---
 
-### Core Gameplay Loops
+### Core Gameplay Features
 
-#### 1. Exploration & Overworld Interactions
-* Navigate a 16px tile-based world with smooth collision, map-link warps, and animated walk cycles.
-* **Line-of-Sight (LOS) Trainers**: Trainers scan all four directions; entering their field of view triggers dialogue and initiates an educational battle.
-* **Laboratory Computer Consoles**: Inspecting consoles (`tile 'H'`) boots the **Grounding DINO Visual Calibration Terminal**, loading technical schematics directly from course material.
-* **Research Audio Bookshelves**: Inspecting bookshelves (`tile 'k'`) plays timestamped 15-second audio logs cut from the course podcast.
+#### 1. 14 Unique LLM-Powered NPCs & Interactive Course Intel Chat
+Talk to any character in the overworld (`Z`/`Space`) to receive in-character dialogue driven by `Meta-Llama-3.1-8B-Instruct`, then open the **Course Intel Chat** inside the modal to ask custom EN/FR questions grounded directly in your loaded PDF or built-in syllabus (`POST /api/npc/chat`):
 
-#### 2. Adaptive Turn-Based Battles
-* **Authentic Combat Choreography**: Split-scanline curtain wipes, arena platforms, 5-frame trainer throw sequences, entry hops, 35 move-effect strips, and scrolling stat-boost chevron waves.
-* **Combat Damage Driven by Pedagogy**:
-  * Choosing the correct move or submitting an accurate open-text explanation triggers a **Critical Hit** (dealing up to $1.35\times$ damage).
-  * Submitting a partial answer deals a glancing blow ($0.5\times$ damage).
-  * Submitting an incorrect answer or falling for an adversarial trap causes the move to fizzle, giving the opponent a counter-attack window.
-* **Gen-3 Combat & Catch Mechanics**: Full 17-type effectiveness chart, STAB multipliers, accuracy/evasion stages, status conditions (sleep, paralysis, burn, poison, confusion), 3-shake Poké Ball capture calculations, and party-wide EXP distribution.
+| Location | NPC Speaker (`ID`) | Distinct Character Persona |
+| :--- | :--- | :--- |
+| **`YOUR HOUSE`** | `MOM` (`mom`) | Loving, overprotective RPG mom comparing tough concepts to soup, sweaters, and doing the dishes |
+| **`REX`'s House** | `REX'S MOM` (`rival_mom` / `MRS. VANCE`) | Warm, gossipy next-door neighbor lovingly embarrassing Rex about studying before dawn |
+| **`ADA`'s Lab** | `PROF. ADA` (`prof_ada`) | Coffee-fueled lead professor translating `Final-DKT-GRU` metrics into clear study strategy |
+| **`WILLOWBROOK` / Lab** | `RIVAL REX` (`tr_rex`) | Cocky, sarcastic, data-obsessed rival benchmarking the course before breakfast |
+| **`WILLOWBROOK`** | `BRAM` (`hv1`), `LUNA` (`hv2`) | Dramatic tall-grass survivalist (`BRAM`) & hyper-caffeinated systems-theory fangirl (`LUNA`) |
+| **`FERNWAY TRAIL`** | `SCOUT CAL` (`tr_cal`), `MIRA` (`tr_mira`) | Energetic expedition trail scout (`CAL`) & razor-sharp, deadpan sarcastic strategist (`MIRA`) |
+| **`STONEGATE`** | `GARR` (`sv1`), `PIPA` (`sv2`) | Battle-scarred Stonegate Gym veteran (`GARR`) & upbeat bird-lover joking about crammers (`PIPA`) |
+| **`POKEMON CENTER` & `POKE MART`** | `NURSE JOYCE` (`nurse`), `CLERK OTTO` (`clerk`) | Cheerful, sassy healing-center nurse (`NURSE`) & fast-talking infomercial Mart hustler (`CLERK`) |
+| **`STONEGATE GYM`** | `ROCCO` (`tr_rocco`), `LEADER MASON` (`tr_mason`) | Gruff boulder-lifting veteran (`ROCCO`) & stoic Granite Gym Leader testing deep synthesis (`MASON`) |
 
-#### 3. Flow State & Dynamic Difficulty Adjustment
-During gameplay, the **Double-DQN Game Master** continuously evaluates student cognitive metrics:
-* If the learner shows signs of struggle or frustration (fail streak $\ge 2$), the Game Master triggers **Action [0] (Audio Hint + Scaffold)** or **Action [3] (Prerequisite Remediation)**.
-* When the student enters Flow with steady mastery, the Game Master deploys **Action [2] (Trainer Flow Battle)**.
-* When concept mastery reaches $\ge 68\%$, the Game Master initiates **Action [4] (Open-Text Boss Synthesis Challenge)**, evaluated live by `DeBERTa-v3-Small`. A successful explanation awards the **`★` Concept Synthesis Badge**.
+#### 2. Live PDF / PPTX / Word Ingestion & Grounded Lab Monitor
+* Press **`ENTER` → `NEW COURSE`** (or **`JOURNAL` → Tab `[3] VLM, DINO LAB & NEW COURSE`**) to upload any `.pdf`, `.pptx`, `.docx`, or schematic image.
+* **`Qwen3-VL-8B` + `LLMDet-Large`** extract balanced diagrams per chapter, discard tiny logos/blank crops, verify bounding boxes, generate conceptual non-spoiler lab questions (`"Identify the component responsible for..."`), and synthesize a custom course-themed opening RPG cutscene via `Llama-3.1-8B`.
+* Inspecting any Laboratory Console (`tile 'H'`) opens the **Lab Monitor**, letting players click or drag bounding boxes across technical schematics graded live via IoU against VLM/DINO ground truth.
+
+#### 3. Adaptive Turn-Based Battles & Background Prefetching
+* **Line-of-Sight Trainers**: Trainers scan all four cardinal directions and challenge you with RL-calibrated questions and LLM-stylized battle lines.
+* **Answer-Driven Combat Multipliers**: Correct MCQ moves deal `1.15×` Focused Strike damage, accurate Open-Text / Boss Neural Strikes deal `1.35×`, partial answers scale down (`>=0.35×` / `0.55×` fallback), and traps/errors fizzle while giving the opponent a counter-attack window.
+* **Authentic GBA Combat Mechanics**: 17-type chart, STAB multipliers, accuracy/evasion stages, status effects, 3-shake ball capture math, and EXP sharing.
+* **Background Prefetch Queue**: `KnowledgeQuestEngine` prefetches next encounters asynchronously while prioritizing active user clicks and NPC chat.
 
 #### 4. The Field Journal (`ENTER -> JOURNAL`)
-* **Tab 1 — Mastery & Affect**: Displays real-time DKT mastery bars across curriculum concepts, earned Concept Badges, and telemetry-derived Focus/Frustration/Boredom gauges.
-* **Tab 2 — Study Notes**: Scrollable syllabus bullet points and on-demand playback of 15-second audio lecture clips.
-* **Tab 3 — AI Lab & Grounding DINO**: Model status inspector and direct launcher for the Grounding DINO diagram puzzle suite.
+* **Tab `[1]` — AI Mastery & Affect**: Live `Final-DKT-GRU` per-concept mastery bars, Concept Synthesis Stars (`★`), and real-time Focus / Frustration / Boredom gauges.
+* **Tab `[2]` — Study Notes & Audio**: Concept revision bullets and 15-second spoken lecture audio playback.
+* **Tab `[3]` — VLM, DINO Lab & New Course**: Model telemetry status, direct Lab Monitor launcher, and live document ingestion uploader.
 
 ---
 
-## 6. Dynamic Course Integration
+## 6. Dynamic Course Integration (`course_material/` & `/api/course/ingest`)
 
-The platform is content-agnostic. Rather than being tied to a single subject, courses are defined as structured packages:
+Beyond the live document uploader (`POST /api/course/ingest`), structured courses can be dropped into `course_material/<course_id>/course_curriculum.json` and registered automatically by `curriculum_bank.py`:
 
 ```json
 {
@@ -317,4 +399,18 @@ The platform is content-agnostic. Rather than being tied to a single subject, co
 }
 ```
 
-New syllabus materials processed by upstream pipelines (summaries, extracted prerequisite graphs, and aligned audio snippets) can be loaded into `course_material/` and registered with `curriculum_bank.py` to generate new game worlds, puzzles, and battle campaigns dynamically.
+Key REST API endpoints served by `server.py` (`GET` / `POST`):
+* `GET /api/status`, `/api/vision/puzzles`, `/api/course/story`, `/api/npc/dialogue`, `/api/course/ingest/status`
+* `POST /api/session/reset`, `/api/session/sync`, `/api/encounter/next`, `/api/encounter/submit`, `/api/vision/evaluate`, `/api/vision/vqa`, `/api/npc/chat`, `/api/course/ingest`
+
+---
+
+## Assets & Educational Disclaimer
+
+This project is an original non-commercial educational research prototype inspired by classic handheld monster-catching RPGs. All platform code, dialogue engines, training pipelines, and curriculum content are original work.
+
+Optional downloaded visual assets (stored locally in `assets/`, never hotlinked at runtime, with built-in procedural Canvas sprite fallbacks in `js/data/sprites.js`) originate from:
+* Front & back monster/item sprites: `42arch/pokemon-dataset-zh` and `PokeAPI/sprites` (fetched via `download-assets.js`).
+* Overworld tilesets & RMXP character walk sheets: `torresflo/Pokemon-Obsidian` (fetched via `download-overworld.js`).
+
+Pokémon is a trademark of Nintendo, Creatures Inc., and GAME FREAK inc. No copyright infringement is intended; all third-party sprite assets remain the property of their respective owners and are used strictly for non-commercial academic demonstration.

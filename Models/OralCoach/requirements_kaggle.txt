@@ -1,0 +1,6 @@
+mediapipe
+hsemotion-onnx
+onnxruntime
+silero-vad
+praat-parselmouth
+faster-whisper

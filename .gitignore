@@ -39,3 +39,7 @@ Models/GroundingDINO/checkpoints/grounding_dino_tiny/model.safetensors
 Models/VLM/checkpoints/**/*.safetensors
 Models/VLM/checkpoints/**/*.bin
 Models/VLM/checkpoints/**/*.pt
+
+# Oral Coach runtime logs & downloaded models
+Models/OralCoach/logs/
+Models/OralCoach/models/*.task

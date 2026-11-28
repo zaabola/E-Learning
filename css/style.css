@@ -1231,3 +1231,223 @@ body.touch #screen {
   border-left: 2px solid #4888c8;
   margin-bottom: 5px;
 }
+
+/* ===== Oral Presentation Coach Modal (`Models/OralCoach`) ===== */
+.oral-coach-card {
+  height: 458px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+}
+.oral-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #2e3e56;
+  flex-wrap: wrap;
+}
+.oral-lv-badge {
+  font-family: var(--px-font);
+  font-size: 8px;
+  color: #f8d048;
+  background: #232c3d;
+  border: 1px solid #8a7228;
+  border-radius: 4px;
+  padding: 3px 7px;
+}
+.oral-xp-track {
+  width: 68px;
+  height: 7px;
+  background: #0d131d;
+  border: 1px solid #3c4d66;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.oral-xp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #b070f8, #f8d048);
+  transition: width 0.25s ease;
+}
+.oral-topic-strip {
+  margin-top: 5px;
+  padding: 4px 8px;
+  background: #101826;
+  border: 1px solid #2c405c;
+  border-radius: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--dialog-font);
+  font-size: 14px;
+  color: #b8d8f8;
+}
+.oral-layout {
+  display: grid;
+  grid-template-columns: 1.12fr 1fr;
+  gap: 9px;
+  flex: 1;
+  min-height: 0;
+  margin-top: 6px;
+}
+.oral-left, .oral-right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+.oral-cam-wrap {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 148px;
+  background: #0b111a;
+  border: 2px solid #486284;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.oral-cam-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.oral-subtitles {
+  min-height: 24px;
+  max-height: 38px;
+  overflow: hidden;
+  padding: 4px 8px;
+  background: #0d131d;
+  border: 1px solid #2d3e54;
+  border-radius: 5px;
+  font-family: var(--dialog-font);
+  font-size: 14px;
+  line-height: 1.2;
+  color: #dff0ff;
+}
+.oral-tip-box {
+  height: 104px;
+  background: #121a28;
+  border: 2px solid #5690d8;
+  border-radius: 6px;
+  padding: 6px 9px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.oral-tip-box.lv2 { border-color: #f8c428; }
+.oral-tip-box.lv3, .oral-tip-box.freeze { border-color: #f87838; }
+.oral-tip-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--px-font);
+  font-size: 7.5px;
+  color: #78ccff;
+}
+.oral-tip-box.lv2 .oral-tip-head { color: #f8d048; }
+.oral-tip-box.lv3 .oral-tip-head, .oral-tip-box.freeze .oral-tip-head { color: #ff9858; }
+.oral-tip-text {
+  font-family: var(--dialog-font);
+  font-size: 16px;
+  line-height: 1.2;
+  color: #ffffff;
+  margin-top: 2px;
+}
+.oral-tip-why {
+  font-family: var(--dialog-font);
+  font-size: 13.5px;
+  line-height: 1.2;
+  color: #a8c0dc;
+}
+.oral-tip-cite {
+  font-family: var(--px-font);
+  font-size: 6.5px;
+  color: #7c96b4;
+}
+.oral-ctrl-strip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  background: #111824;
+  border: 1px solid #2d3e54;
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-family: var(--px-font);
+  font-size: 7.5px;
+  color: #c8daf0;
+}
+.oral-bars-card {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  background: #101722;
+  border: 1px solid #2e3f58;
+  border-radius: 6px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 5px;
+}
+.oral-bar-row {
+  display: grid;
+  grid-template-columns: 82px 1fr 48px;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--px-font);
+  font-size: 7px;
+  color: #d4e4f4;
+}
+.oral-bar-row.red-blink {
+  color: #ff9090;
+  animation: oralBlink 0.7s steps(2, start) infinite;
+}
+@keyframes oralBlink {
+  50% { opacity: 0.45; }
+}
+.oral-bar-track {
+  height: 9px;
+  background: #1e2436;
+  border: 1px solid #0c101a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.oral-bar-fill {
+  height: 100%;
+  transition: width 0.25s ease;
+}
+.oral-bar-fill.good { background: linear-gradient(90deg, #40b858, #78f088); }
+.oral-bar-fill.warn { background: linear-gradient(90deg, #d89820, #ffd860); }
+.oral-bar-fill.bad  { background: linear-gradient(90deg, #c83030, #ff7070); }
+.oral-metrics-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--px-font);
+  font-size: 7px;
+  color: #ffe080;
+  background: #131c2b;
+  border: 1px solid #2c3e56;
+  border-radius: 5px;
+  padding: 5px 8px;
+}
+.oral-warn-box {
+  background: #28161a;
+  border: 1px solid #943840;
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-family: var(--dialog-font);
+  font-size: 13px;
+  line-height: 1.22;
+  color: #ffc2c2;
+  max-height: 62px;
+  overflow-y: auto;
+}
+.oral-btn-toggle.off {
+  opacity: 0.65;
+  border-color: #546478;
+  background: #1c2430;
+}

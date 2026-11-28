@@ -1,16 +1,20 @@
 """
-Turnkey Kaggle 2x T4 GPU Launcher for the Full RPG + 5-Model AI Engine
+Turnkey Kaggle 2x T4 GPU Launcher for the Full RPG + 7-Model AI + Oral Coach Engine
 (`kaggle_run_game.py`)
-======================================================================
-Runs the complete browser RPG + all 5 AI models (`Qwen3-VL-8B-Instruct`
+===================================================================================
+Runs the complete browser RPG + all 7 AI models (`Qwen3-VL-8B-Instruct`
 with `Qwen2.5-VL-7B-Instruct` fallback, `LLMDet-Large` with
 `Grounding-DINO-Base/Tiny` fallback, `DeBERTa-v3-Small`, `Final-DKT-GRU`,
-`Double-DQN`) 100% on Kaggle's GPUs (zero load on your local PC!) and opens
-a public HTTPS URL (`https://....trycloudflare.com`) to play in your browser.
+`Double-DQN`, `DeepSeek-R1-Distill-Qwen-7B`, `Meta-Llama-3.1-8B-Instruct + QLoRA`)
+AND the live GPU **Oral Presentation Coach** (MediaPipe + HSEmotion + Silero VAD +
+audEERING FP16 + faster-whisper FP16 + Stage-4 GPU TipWriter) on Kaggle GPUs,
+opening a public HTTPS URL (`https://....trycloudflare.com`) for browser play.
 
 Usage inside a Kaggle GPU Notebook (Accelerator: GPU T4 x2, Internet: ON):
-  !git pull origin interactive_learning_RPG
-  !pip install -q -U pymupdf accelerate bitsandbytes qwen-vl-utils transformers
+  !git pull origin main
+  !pip install -q -U pymupdf python-pptx python-docx accelerate bitsandbytes peft qwen-vl-utils transformers
+  !pip install -q -r Models/OralCoach/requirements_kaggle.txt
+  !python Models/OralCoach/setup_models.py --whisper-model base
   !python kaggle_run_game.py
 """
 
@@ -73,6 +77,8 @@ def _start_cloudflare_tunnel(port: int = 8000):
                 print("    3. Select any .pdf, .pptx, or .docx file from your computer.")
                 print("    4. Click INGEST DOCUMENT — Kaggle's Qwen3-VL-8B + LLMDet-Large")
                 print("       will extract the photos & concepts and launch the Lab Monitor!")
+                print("    5. Walk up to the PC desk in YOUR ROOM (top-left) and press Z")
+                print("       to launch the live GPU Oral Presentation Coach in your browser!")
                 print("=" * 88 + "\n", flush=True)
 
     t = threading.Thread(target=_reader, daemon=True)
@@ -91,7 +97,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 88)
-    print("  BOOTING 7-MODEL AI + RPG SERVER ON KAGGLE GPUs")
+    print("  BOOTING FULL AI + ORAL COACH RPG SERVER ON KAGGLE GPUs")
     print("=" * 88)
     state = GameServerState(
         default_course="vision_yolo_ocr",
@@ -114,6 +120,18 @@ def main():
     print(f"  [Model #5] {eng.vlm_info['name']:<26} | Mode={eng.vlm_info['mode'].upper()}")
     print(f"  [Model #6] {llm_r['name']:<26} | Live={llm_r['live']} ({llm_r['model_id']})")
     print(f"  [Model #7] {llm_s['name']:<26} | Live={llm_s['live']} | QLoRA={llm_s['qlora_active']}")
+    if state.oral_coach is not None:
+        oc = state.oral_coach.get_capabilities()
+        oc_dev = oc.get("best_cuda_device") or "cpu"
+        oc_vram = f"{oc['free_cuda_gib']:.2f}GiB free" if oc.get("free_cuda_gib") else "CPU mode"
+        oc_tip = "Stage4 GPU LLM" if oc.get("stage4_llm_tip_writer") else "Template/Ollama"
+        miss = oc.get("missing_packages") or []
+        print(f"  [Model #8] {'Oral Presentation Coach':<26} | Target={oc_dev} ({oc_vram}) | TipWriter={oc_tip}")
+        if miss:
+            print(f"             Notice: Missing Kaggle pkgs {miss}")
+            print(f"             Run: {oc.get('kaggle_install_cmd')}")
+        elif not oc.get("face_model_ready"):
+            print("             Tip: Cache models first -> !python Models/OralCoach/setup_models.py --whisper-model base")
     print("-" * 88)
     print("  Tip: Train custom RPG QLoRA adapter -> !python -u Models/LLM/scripts/train_persona_qlora.py")
     print("  Tip: Run Stage 4 LLM benchmark      -> !python -u Models/LLM/scripts/evaluate_stage4_llms.py")

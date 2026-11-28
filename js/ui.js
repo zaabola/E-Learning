@@ -2160,11 +2160,709 @@ const UI = (() => {
     });
   }
 
+  // ----- Oral Presentation Coach Modal (`Models/OralCoach`) -----
+  function oralCoachScreen() {
+    return new Promise((resolve) => {
+      const st = (typeof AITutor !== 'undefined' && AITutor.getStatus) ? AITutor.getStatus() : {};
+      const courseTitle = st.course_title || 'General Presentation';
+      const concepts = Array.isArray(st.concepts) ? st.concepts : [];
+      const weakConcept = concepts.length
+        ? concepts.reduce((a, b) => ((a.mastery || 0) <= (b.mastery || 0) ? a : b))
+        : null;
+      const practiceTopic = (weakConcept && (weakConcept.short_title || weakConcept.title)) || courseTitle;
+      const isFr = /[éèêëàâçùûîïôœ]/i.test(courseTitle) || (st.course_story && st.course_story.language === 'French');
+
+      const backdrop = document.createElement('div');
+      backdrop.className = 'ai-modal-backdrop';
+      const card = document.createElement('div');
+      card.className = 'ai-modal-card oral-coach-card';
+      backdrop.appendChild(card);
+      menuLayer.appendChild(backdrop);
+
+      const BAR_SPEC = [
+        { key: 'stress', label: 'STRESS', highBad: true },
+        { key: 'confidence', label: 'CONFIDENCE', highBad: false },
+        { key: 'energy', label: 'ENERGY', highBad: false },
+        { key: 'positivity', label: 'POSITIVITY', highBad: false },
+        { key: 'eye_contact', label: 'EYE CONTACT', highBad: false, pct: true },
+        { key: 'expressiveness', label: 'EXPRESS.', highBad: false },
+        { key: 'pace', label: 'PACE', highBad: null },
+      ];
+
+      function zoneFor(v, highBad) {
+        if (v === null || v === undefined) return 'good';
+        if (highBad === null) {
+          const d = Math.abs(v - 0.5);
+          return d > 0.3 ? 'bad' : (d > 0.2 ? 'warn' : 'good');
+        }
+        if (highBad) return v > 0.7 ? 'bad' : (v > 0.5 ? 'warn' : 'good');
+        return v < 0.2 ? 'bad' : (v < 0.35 ? 'warn' : 'good');
+      }
+
+      card.innerHTML = `
+        <div class="oral-top-bar">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="ai-dot" id="oc-net-dot"></span>
+            <span class="ai-badge-rl">ORAL COACH PC</span>
+            <span class="oral-lv-badge" id="oc-lv-badge">LV 1</span>
+            <div class="oral-xp-track"><div class="oral-xp-fill" id="oc-xp-fill" style="width:0%"></div></div>
+            <span style="font-family:var(--px-font);font-size:7px;color:#b8d0e8" id="oc-xp-txt">0 XP</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <button type="button" class="ai-btn-mini oral-btn-toggle" id="oc-sound-btn">[S] SOUND ON</button>
+            <button type="button" class="ai-btn-mini oral-btn-toggle off" id="oc-voice-btn">[V] VOICE OFF</button>
+            <button type="button" class="ai-btn-mini" id="oc-desktop-btn" style="display:none">DESKTOP</button>
+            <button type="button" class="ai-btn-mini" id="oc-close-btn">CLOSE [ESC]</button>
+          </div>
+        </div>
+        <div class="oral-topic-strip">
+          <span><b>COURSE:</b> ${escHtml(courseTitle.slice(0, 32))} &mdash; <b>EXPLAIN:</b> ${escHtml(practiceTopic.slice(0, 34))}</span>
+          <span style="font-family:var(--px-font);font-size:7px;color:#8cc8f8" id="oc-backend-txt">checking...</span>
+        </div>
+        <div class="oral-layout">
+          <div class="oral-left">
+            <div class="oral-cam-wrap">
+              <canvas class="oral-cam-canvas" id="oc-cam-canvas" width="320" height="196"></canvas>
+            </div>
+            <div class="oral-subtitles" id="oc-subtitles">Waiting for speech... talk normally for 30s to calibrate.</div>
+            <div class="oral-tip-box" id="oc-tip-box">
+              <div class="oral-tip-head">
+                <span id="oc-tip-lvl">COACH READY</span>
+                <span id="oc-tip-strat">CALIBRATE 30S</span>
+              </div>
+              <div class="oral-tip-text" id="oc-tip-text">Speak naturally about ${escHtml(practiceTopic)} — the coach builds your voice &amp; gaze baseline first.</div>
+              <div class="oral-tip-why" id="oc-tip-why">Tips appear automatically with citations when stress spikes, pace rushes, or eye contact drops.</div>
+              <div class="oral-tip-cite" id="oc-tip-cite"></div>
+            </div>
+          </div>
+          <div class="oral-right">
+            <div class="oral-ctrl-strip">
+              <span><b id="oc-timer">00:00</b> &bull; <span id="oc-calib-txt">CAL 0%</span></span>
+              <span>MIC <span id="oc-mic-txt">--</span></span>
+              <button type="button" class="ai-btn-primary" style="padding:4px 9px;font-size:7.5px" id="oc-toggle-btn">RETRY CAM/MIC</button>
+            </div>
+            <div class="oral-bars-card" id="oc-bars-card">
+              ${BAR_SPEC.map(b => `
+                <div class="oral-bar-row" id="oc-row-${b.key}">
+                  <span>${b.label}</span>
+                  <div class="oral-bar-track"><div class="oral-bar-fill good" id="oc-fill-${b.key}" style="width:0%"></div></div>
+                  <span style="text-align:right" id="oc-val-${b.key}">--</span>
+                </div>
+              `).join('')}
+            </div>
+            <div class="oral-metrics-row">
+              <span id="oc-fillers-txt">FILLERS: --</span>
+              <span id="oc-feeling-txt">FEELING: --</span>
+              <span id="oc-popups-txt" style="color:#78f098"></span>
+            </div>
+            <div class="oral-warn-box" id="oc-warn-box" style="display:none"></div>
+          </div>
+        </div>
+      `;
+
+      const camCanvas = card.querySelector('#oc-cam-canvas');
+      const camCtx = camCanvas.getContext('2d');
+      const netDot = card.querySelector('#oc-net-dot');
+      const lvBadge = card.querySelector('#oc-lv-badge');
+      const xpFill = card.querySelector('#oc-xp-fill');
+      const xpTxt = card.querySelector('#oc-xp-txt');
+      const soundBtn = card.querySelector('#oc-sound-btn');
+      const voiceBtn = card.querySelector('#oc-voice-btn');
+      const desktopBtn = card.querySelector('#oc-desktop-btn');
+      const closeBtn = card.querySelector('#oc-close-btn');
+      const backendTxt = card.querySelector('#oc-backend-txt');
+      const subEl = card.querySelector('#oc-subtitles');
+      const tipBox = card.querySelector('#oc-tip-box');
+      const tipLvl = card.querySelector('#oc-tip-lvl');
+      const tipStrat = card.querySelector('#oc-tip-strat');
+      const tipText = card.querySelector('#oc-tip-text');
+      const tipWhy = card.querySelector('#oc-tip-why');
+      const tipCite = card.querySelector('#oc-tip-cite');
+      const timerEl = card.querySelector('#oc-timer');
+      const calibEl = card.querySelector('#oc-calib-txt');
+      const micEl = card.querySelector('#oc-mic-txt');
+      const toggleBtn = card.querySelector('#oc-toggle-btn');
+      const fillersEl = card.querySelector('#oc-fillers-txt');
+      const feelingEl = card.querySelector('#oc-feeling-txt');
+      const popupsEl = card.querySelector('#oc-popups-txt');
+      const warnBox = card.querySelector('#oc-warn-box');
+
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.autoplay = true;
+      const capCanvas = document.createElement('canvas');
+      capCanvas.width = 320;
+      capCanvas.height = 240;
+      const capCtx = capCanvas.getContext('2d');
+
+      let closed = false;
+      let stream = null;
+      let audioCtx = null;
+      let scriptNode = null;
+      let muteGain = null;
+      let speechRec = null;
+      let rafId = 0;
+      let ingestTimer = null;
+      let ingestInFlight = false;
+      let voiceOn = false;
+      let lastSeq = 0;
+      let lastLevel = 1;
+      let wasCalibrated = false;
+      let lastTipId = null;
+      let tipFullText = '';
+      let tipStartT = 0;
+      let tipBlipped = 0;
+      let latestState = null;
+      let pendingTranscript = '';
+      let camError = '';
+      let clientRms = 0;
+      let localFlashUntil = 0;
+      let localFlashColor = '#58e880';
+      let localBanner = null;
+      let installHelp = '';
+
+      const pcmQueue = [];
+      let pcmLen = 0;
+
+      function updateSoundVoiceBtns() {
+        const sOn = Sfx.isOn();
+        soundBtn.textContent = `[S] SOUND ${sOn ? 'ON' : 'OFF'}`;
+        soundBtn.classList.toggle('off', !sOn);
+        voiceBtn.textContent = `[V] VOICE ${voiceOn ? 'ON' : 'OFF'}`;
+        voiceBtn.classList.toggle('off', !voiceOn);
+      }
+
+      function downsampleToInt16(floatArr, inSr, outSr = 16000) {
+        if (!floatArr || !floatArr.length) return new Int16Array(0);
+        if (inSr === outSr) {
+          const out = new Int16Array(floatArr.length);
+          for (let i = 0; i < floatArr.length; i++) {
+            const s = Math.max(-1, Math.min(1, floatArr[i]));
+            out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          return out;
+        }
+        const ratio = inSr / outSr;
+        const outLen = Math.max(1, Math.floor(floatArr.length / ratio));
+        const out = new Int16Array(outLen);
+        let offBuf = 0;
+        for (let i = 0; i < outLen; i++) {
+          const nextOff = Math.min(floatArr.length, Math.round((i + 1) * ratio));
+          let sum = 0;
+          let count = 0;
+          for (let j = offBuf; j < nextOff; j++) {
+            sum += floatArr[j];
+            count++;
+          }
+          offBuf = nextOff;
+          const v = Math.max(-1, Math.min(1, count ? sum / count : 0));
+          out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+        }
+        return out;
+      }
+
+      function int16ToBase64(chunks, totalSamples) {
+        const bytes = new Uint8Array(totalSamples * 2);
+        let byteOffset = 0;
+        for (const chunk of chunks) {
+          bytes.set(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength), byteOffset);
+          byteOffset += chunk.byteLength;
+        }
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x4000) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x4000));
+        }
+        return btoa(bin);
+      }
+
+      function speakTip(text) {
+        if (!voiceOn || !text || typeof window === 'undefined' || !window.speechSynthesis) return;
+        try {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(text);
+          u.lang = isFr ? 'fr-FR' : 'en-US';
+          u.rate = 1.05;
+          const estSec = Math.max(2.0, Math.min(8.0, text.split(/\s+/).length * 0.45 + 0.8));
+          AITutor.oralCoachMute(estSec);
+          window.speechSynthesis.speak(u);
+        } catch (e) { /* ignore */ }
+      }
+
+      function handleEvents(state) {
+        const events = Array.isArray(state.events) ? state.events : [];
+        for (const ev of events) {
+          if (ev.seq && ev.seq <= lastSeq) continue;
+          if (ev.seq) lastSeq = ev.seq;
+          if (ev.type === 'tip') {
+            if (ev.urgent) Sfx.statDown();
+            else Sfx.select();
+            if (voiceOn) speakTip(ev.say || ev.text);
+          } else if (ev.type === 'tip_result') {
+            if (ev.worked) {
+              Sfx.heal();
+              localFlashColor = '#68f888';
+              localFlashUntil = performance.now() + 400;
+              localBanner = { text: ev.message || 'IT WORKED!', good: true, until: performance.now() + 3000 };
+            } else {
+              Sfx.statDown();
+              localBanner = { text: ev.message || 'TRY NEXT STEP', good: false, until: performance.now() + 2600 };
+            }
+          } else if (ev.type === 'praise') {
+            Sfx.statUp();
+            localFlashColor = '#ffd858';
+            localFlashUntil = performance.now() + 400;
+          }
+        }
+        const snap = state.snap;
+        if (snap && snap.calibrated && !wasCalibrated) {
+          wasCalibrated = true;
+          Sfx.heal();
+          localBanner = { text: 'CALIBRATED!', good: true, until: performance.now() + 2400 };
+        }
+        const feel = state.feel;
+        if (feel && feel.level > lastLevel) {
+          lastLevel = feel.level;
+          Sfx.levelUp();
+          localFlashColor = '#ffffff';
+          localFlashUntil = performance.now() + 450;
+          localBanner = { text: `COACH LEVEL ${feel.level}!`, good: true, until: performance.now() + 2800 };
+        }
+      }
+
+      function updateHud(state) {
+        if (!state) return;
+        latestState = state;
+        netDot.classList.toggle('offline', !!state.offline);
+        const feel = state.feel || {};
+        lvBadge.textContent = `LV ${feel.level || 1}`;
+        xpFill.style.width = `${Math.round((feel.xp_frac || 0) * 100)}%`;
+        xpTxt.textContent = `${feel.total_xp_earned || 0} XP`;
+
+        const secs = Math.max(0, Math.floor(state.elapsed_s || 0));
+        timerEl.textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+
+        const snap = state.snap || null;
+        const calPct = snap ? (snap.calibrated ? 100 : Math.round((snap.calibration_progress || 0) * 100)) : 0;
+        calibEl.textContent = snap && snap.calibrated ? 'CALIBRATED' : `CAL ${calPct}%`;
+        calibEl.style.color = snap && snap.calibrated ? '#78f088' : '#f8d048';
+
+        const ch = (snap && snap.channels) || {};
+        const redSet = new Set((feel && feel.red_rows) || []);
+        for (const spec of BAR_SPEC) {
+          const row = card.querySelector(`#oc-row-${spec.key}`);
+          const fill = card.querySelector(`#oc-fill-${spec.key}`);
+          const valEl = card.querySelector(`#oc-val-${spec.key}`);
+          const rawV = ch[spec.key];
+          row.classList.toggle('red-blink', redSet.has(spec.key));
+          if (rawV === null || rawV === undefined) {
+            fill.style.width = '0%';
+            fill.className = 'oral-bar-fill good';
+            valEl.textContent = '--';
+          } else {
+            const pct = Math.max(0, Math.min(100, Math.round(rawV * 100)));
+            fill.style.width = `${pct}%`;
+            fill.className = `oral-bar-fill ${zoneFor(rawV, spec.highBad)}`;
+            if (spec.key === 'pace' && ch.pace_wpm != null) {
+              valEl.textContent = `${Math.round(ch.pace_wpm)}wpm`;
+            } else if (spec.pct) {
+              valEl.textContent = `${pct}%`;
+            } else {
+              valEl.textContent = Number(rawV).toFixed(2);
+            }
+          }
+        }
+
+        fillersEl.textContent = ch.fillers_per_min != null
+          ? `FILLERS: ${Number(ch.fillers_per_min).toFixed(1)}/m`
+          : 'FILLERS: --';
+        const emo = snap && snap.face_top_emotion;
+        feelingEl.textContent = emo
+          ? `FEELING: ${String(emo[0]).toUpperCase()} ${Math.round(emo[1] * 100)}%`
+          : 'FEELING: --';
+
+        const pops = Array.isArray(feel.popups) ? feel.popups : [];
+        popupsEl.textContent = pops.length ? pops[pops.length - 1].text : '';
+
+        if (snap && snap.transcript) {
+          subEl.textContent = `"${snap.transcript}"`;
+        } else if (pendingTranscript) {
+          subEl.textContent = `"${pendingTranscript}"`;
+        }
+
+        const cv = state.coach || {};
+        if (cv.backend) backendTxt.textContent = cv.backend;
+        if (cv.tip) {
+          const t = cv.tip;
+          const lvlNames = { 1: 'LEVEL 1 TIP', 2: 'LEVEL 2 TRY THIS NOW', 3: 'LEVEL 3 PAUSE' };
+          const tag = t.urgent ? 'URGENT FREEZE' : (lvlNames[t.level] || 'COACH TIP');
+          tipBox.className = `oral-tip-box ${t.urgent ? 'freeze' : (t.level === 2 ? 'lv2' : (t.level >= 3 ? 'lv3' : ''))}`;
+          tipLvl.textContent = tag;
+          tipStrat.textContent = t.strategy ? String(t.strategy).replace(/_/g, ' ').toUpperCase() : '';
+          tipWhy.textContent = t.why || '';
+          tipCite.textContent = t.source ? `Source: ${t.source}` : '';
+          if (t.id !== lastTipId) {
+            lastTipId = t.id;
+            tipFullText = t.text || '';
+            tipStartT = performance.now();
+            tipBlipped = 0;
+          }
+        } else if (cv.toast && cv.toast.text) {
+          tipBox.className = 'oral-tip-box';
+          tipLvl.textContent = 'COACH PRAISE';
+          tipStrat.textContent = 'STEADY';
+          tipFullText = '';
+          tipText.textContent = cv.toast.text;
+          tipWhy.textContent = 'Keep holding this calm pace and eye contact.';
+          tipCite.textContent = '';
+        }
+
+        const warnList = [];
+        if (camError) warnList.push(camError);
+        if (state.offline) warnList.push('Server offline: start python server.py for full ML scoring.');
+        if (Array.isArray(state.warnings)) {
+          for (const w of state.warnings) if (!warnList.includes(w)) warnList.push(w);
+        }
+        if (warnList.length || installHelp) {
+          warnBox.style.display = 'block';
+          warnBox.innerHTML = warnList.map(w => `<div>&bull; ${escHtml(w)}</div>`).join('')
+            + (installHelp ? `<div style="margin-top:3px;color:#ffd890">Setup: <code>${escHtml(installHelp)}</code></div>` : '');
+        } else {
+          warnBox.style.display = 'none';
+        }
+      }
+
+      function renderLoop() {
+        if (closed) return;
+        const W = camCanvas.width, H = camCanvas.height;
+        camCtx.fillStyle = '#0c121c';
+        camCtx.fillRect(0, 0, W, H);
+
+        if (stream && video.readyState >= 2) {
+          camCtx.save();
+          camCtx.translate(W, 0);
+          camCtx.scale(-1, 1);
+          camCtx.drawImage(video, 0, 0, W, H);
+          camCtx.restore();
+
+          const face = latestState && latestState.face;
+          if (face && Array.isArray(face.bbox)) {
+            const [bx0, by0, bx1, by1] = face.bbox;
+            const x0 = Math.round((1 - bx1) * W);
+            const x1 = Math.round((1 - bx0) * W);
+            const y0 = Math.round(by0 * H);
+            const y1 = Math.round(by1 * H);
+            const col = face.looking ? '#58e878' : '#f8c838';
+            const c = 12;
+            camCtx.strokeStyle = col;
+            camCtx.lineWidth = 3;
+            camCtx.beginPath();
+            camCtx.moveTo(x0, y0 + c); camCtx.lineTo(x0, y0); camCtx.lineTo(x0 + c, y0);
+            camCtx.moveTo(x1 - c, y0); camCtx.lineTo(x1, y0); camCtx.lineTo(x1, y0 + c);
+            camCtx.moveTo(x0, y1 - c); camCtx.lineTo(x0, y1); camCtx.lineTo(x0 + c, y1);
+            camCtx.moveTo(x1 - c, y1); camCtx.lineTo(x1, y1); camCtx.lineTo(x1, y1 - c);
+            camCtx.stroke();
+
+            camCtx.fillStyle = 'rgba(12,18,28,0.82)';
+            camCtx.fillRect(x0, Math.max(4, y0 - 16), 92, 13);
+            camCtx.fillStyle = col;
+            camCtx.font = '8px "Press Start 2P", monospace';
+            camCtx.fillText(face.looking ? 'EYES ON CAM' : 'LOOK BACK', x0 + 4, Math.max(13, y0 - 7));
+          } else {
+            camCtx.fillStyle = 'rgba(18, 22, 40, 0.84)';
+            camCtx.fillRect(8, 8, 128, 20);
+            camCtx.strokeStyle = '#f8c838';
+            camCtx.lineWidth = 2;
+            camCtx.strokeRect(8, 8, 128, 20);
+            camCtx.fillStyle = '#f8c838';
+            camCtx.font = '8px "Press Start 2P", monospace';
+            camCtx.fillText(latestState && latestState.snap ? 'LOOK AT CAMERA' : 'WEBCAM ACTIVE', 14, 21);
+          }
+        } else {
+          camCtx.fillStyle = '#8aa4c4';
+          camCtx.font = '9px "Press Start 2P", monospace';
+          camCtx.textAlign = 'center';
+          camCtx.fillText(camError ? 'CAMERA UNAVAILABLE' : 'STARTING CAMERA...', W / 2, H / 2 - 4);
+          camCtx.textAlign = 'left';
+        }
+
+        const now = performance.now();
+        if (now < localFlashUntil) {
+          camCtx.fillStyle = localFlashColor;
+          camCtx.globalAlpha = 0.25 * ((localFlashUntil - now) / 450);
+          camCtx.fillRect(0, 0, W, H);
+          camCtx.globalAlpha = 1;
+        }
+        if (localBanner && now < localBanner.until) {
+          camCtx.fillStyle = localBanner.good ? 'rgba(20, 72, 38, 0.92)' : 'rgba(92, 30, 30, 0.92)';
+          camCtx.fillRect(W / 2 - 90, 10, 180, 22);
+          camCtx.strokeStyle = localBanner.good ? '#78f088' : '#ff7878';
+          camCtx.lineWidth = 2;
+          camCtx.strokeRect(W / 2 - 90, 10, 180, 22);
+          camCtx.fillStyle = '#fff';
+          camCtx.font = '8px "Press Start 2P", monospace';
+          camCtx.textAlign = 'center';
+          camCtx.fillText(localBanner.text.slice(0, 22), W / 2, 24);
+          camCtx.textAlign = 'left';
+        }
+
+        // Update live RPG typewriter reveal inside tip box
+        if (tipFullText) {
+          const chars = Math.min(tipFullText.length, Math.floor(((now - tipStartT) / 1000) * 42) + 1);
+          if (chars > tipBlipped) {
+            if (chars >= tipBlipped + 2 || chars === tipFullText.length) {
+              if (tipFullText[chars - 1] !== ' ') Sfx.blip();
+              tipBlipped = chars;
+            }
+          }
+          tipText.textContent = tipFullText.slice(0, chars);
+        }
+
+        // Live client mic meter indicator
+        const bars = Math.min(5, Math.round(clientRms * 22));
+        micEl.textContent = stream ? ('█'.repeat(bars) + '░'.repeat(5 - bars)) : 'OFF';
+        micEl.style.color = bars >= 1 ? '#78f088' : '#8aa2bc';
+
+        rafId = requestAnimationFrame(renderLoop);
+      }
+
+      async function pumpIngest() {
+        if (closed || ingestInFlight) return;
+        ingestInFlight = true;
+        try {
+          let frameB64 = null;
+          if (stream && video.readyState >= 2) {
+            capCtx.drawImage(video, 0, 0, capCanvas.width, capCanvas.height);
+            frameB64 = capCanvas.toDataURL('image/jpeg', 0.65);
+          }
+          let pcmB64 = null;
+          if (pcmLen > 0) {
+            const chunks = pcmQueue.splice(0, pcmQueue.length);
+            const n = pcmLen;
+            pcmLen = 0;
+            pcmB64 = int16ToBase64(chunks, n);
+          }
+          const tx = pendingTranscript;
+          pendingTranscript = '';
+          const res = await AITutor.oralCoachIngest({
+            frame_b64: frameB64,
+            pcm16_b64: pcmB64,
+            sample_rate: 16000,
+            transcript: tx || null,
+            since_seq: lastSeq,
+          });
+          if (!closed && res && !res.offline) {
+            handleEvents(res);
+            updateHud(res);
+          }
+        } finally {
+          ingestInFlight = false;
+        }
+      }
+
+      async function initCameraAndMic() {
+        camError = '';
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+        if (audioCtx) {
+          try { await audioCtx.close(); } catch (e) { /* ignore */ }
+          audioCtx = null;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          camError = 'Browser camera/mic API requires localhost or HTTPS.';
+          return;
+        }
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' },
+            audio: { echoCancellation: true, noiseSuppression: true },
+          });
+          video.srcObject = stream;
+          await video.play().catch(() => {});
+
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) {
+            audioCtx = new AC();
+            const srcNode = audioCtx.createMediaStreamSource(stream);
+            scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+            muteGain = audioCtx.createGain();
+            muteGain.gain.value = 0;
+            scriptNode.onaudioprocess = (ev) => {
+              if (closed) return;
+              const inp = ev.inputBuffer.getChannelData(0);
+              let sq = 0;
+              for (let i = 0; i < inp.length; i++) sq += inp[i] * inp[i];
+              clientRms = Math.sqrt(sq / inp.length);
+              const pcm16 = downsampleToInt16(inp, audioCtx.sampleRate, 16000);
+              if (pcmLen < 32000) {
+                pcmQueue.push(pcm16);
+                pcmLen += pcm16.length;
+              }
+            };
+            srcNode.connect(scriptNode);
+            scriptNode.connect(muteGain);
+            muteGain.connect(audioCtx.destination);
+          }
+        } catch (err) {
+          camError = `Camera/mic denied or unavailable (${err && err.name ? err.name : 'error'}).`;
+        }
+      }
+
+      function startBrowserSpeechFallback() {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR || speechRec) return;
+        try {
+          speechRec = new SR();
+          speechRec.continuous = true;
+          speechRec.interimResults = true;
+          speechRec.lang = isFr ? 'fr-FR' : 'en-US';
+          speechRec.onresult = (ev) => {
+            if (closed) return;
+            for (let i = ev.resultIndex; i < ev.results.length; i++) {
+              const txt = String(ev.results[i][0].transcript || '').trim();
+              if (txt) {
+                subEl.textContent = `"${txt}"`;
+                if (ev.results[i].isFinal) pendingTranscript = txt;
+              }
+            }
+          };
+          speechRec.onerror = () => {};
+          speechRec.onend = () => {
+            if (!closed && speechRec) {
+              try { speechRec.start(); } catch (e) { /* ignore */ }
+            }
+          };
+          speechRec.start();
+        } catch (e) {
+          speechRec = null;
+        }
+      }
+
+      async function bootSession() {
+        updateSoundVoiceBtns();
+        const capState = await AITutor.oralCoachStatus(0);
+        const caps = (capState && capState.capabilities) || {};
+        if (caps.desktop_supported && caps.is_local_client) {
+          desktopBtn.style.display = 'inline-block';
+        }
+        if (Array.isArray(caps.missing_packages) && caps.missing_packages.length) {
+          installHelp = (!caps.is_local_client && caps.kaggle_install_cmd)
+            ? caps.kaggle_install_cmd
+            : (caps.install_cmd || 'pip install -r Models/OralCoach/requirements.txt && python Models/OralCoach/setup_models.py');
+        }
+        await initCameraAndMic();
+        const started = await AITutor.oralCoachStart({
+          language: isFr ? 'fr' : 'en',
+          course_title: `${courseTitle}: ${practiceTopic}`,
+        });
+        if (!closed && started && !started.offline) {
+          updateHud(started);
+          const sc = started.capabilities || caps;
+          if (!sc.available_modules || !sc.available_modules.faster_whisper) {
+            startBrowserSpeechFallback();
+          }
+        } else if (!closed) {
+          startBrowserSpeechFallback();
+          updateHud({ offline: true, warnings: ['Server offline — previewing camera/mic locally.'] });
+        }
+        ingestTimer = setInterval(pumpIngest, 260);
+        rafId = requestAnimationFrame(renderLoop);
+      }
+
+      let unsubTouch = null;
+
+      async function closeModal() {
+        if (closed) return;
+        closed = true;
+        if (unsubTouch) { unsubTouch(); unsubTouch = null; }
+        if (rafId) cancelAnimationFrame(rafId);
+        if (ingestTimer) clearInterval(ingestTimer);
+        window.removeEventListener('keydown', onKey, true);
+        if (speechRec) {
+          const sr = speechRec;
+          speechRec = null;
+          try { sr.stop(); } catch (e) { /* ignore */ }
+        }
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+        }
+        if (scriptNode) { try { scriptNode.disconnect(); } catch (e) { /* ignore */ } }
+        if (muteGain) { try { muteGain.disconnect(); } catch (e) { /* ignore */ } }
+        if (audioCtx) { try { await audioCtx.close(); } catch (e) { /* ignore */ } }
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+        const stopRes = await AITutor.oralCoachStop();
+        backdrop.remove();
+        Input.clearPressed();
+        resolve((stopRes && stopRes.summary) || null);
+      }
+
+      function onKey(e) {
+        if (e.key === 'Escape' || e.key === 'q' || e.key === 'Q') {
+          e.preventDefault();
+          e.stopPropagation();
+          Sfx.cancel();
+          closeModal();
+          return;
+        }
+        if (e.key === 's' || e.key === 'S') {
+          e.preventDefault();
+          e.stopPropagation();
+          Sfx.toggle();
+          updateSoundVoiceBtns();
+          return;
+        }
+        if (e.key === 'v' || e.key === 'V') {
+          e.preventDefault();
+          e.stopPropagation();
+          voiceOn = !voiceOn;
+          if (!voiceOn && window.speechSynthesis) {
+            try { window.speechSynthesis.cancel(); } catch (err) { /* ignore */ }
+          }
+          Sfx.cursor();
+          updateSoundVoiceBtns();
+          return;
+        }
+        e.stopPropagation();
+      }
+
+      soundBtn.onclick = () => { Sfx.toggle(); updateSoundVoiceBtns(); };
+      voiceBtn.onclick = () => {
+        voiceOn = !voiceOn;
+        if (!voiceOn && window.speechSynthesis) {
+          try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+        }
+        Sfx.cursor();
+        updateSoundVoiceBtns();
+      };
+      toggleBtn.onclick = () => { Sfx.select(); initCameraAndMic(); };
+      desktopBtn.onclick = async () => {
+        Sfx.select();
+        const r = await AITutor.oralCoachLaunchDesktop({ speak: voiceOn });
+        if (r && r.launched) {
+          localBanner = { text: 'DESKTOP WINDOW OPEN', good: true, until: performance.now() + 2600 };
+        } else {
+          camError = (r && r.error) || 'Could not open desktop Oral Coach window.';
+          updateHud(latestState || { offline: !!(r && r.offline) });
+        }
+      };
+      closeBtn.onclick = () => { Sfx.cancel(); closeModal(); };
+
+      window.addEventListener('keydown', onKey, true);
+      unsubTouch = Input.listen(['b', 'start'], () => { Sfx.cancel(); closeModal(); });
+      bootSession();
+    });
+  }
+
   return {
     init, say, sayLines, setPrompt, hideDialog, choose, yesNo, toast,
     fadeOut, fadeIn, flashScreen,
     setBox, setStatusChip, setEnemyBalls, hideBoxes, setBattleAiPill, animateHp, animateExp,
     moveMenu, partyScreen, bagScreen, shopScreen, starterChoice,
-    saveModal, importModal, askEncounterModal, npcChatModal, questScreen, dinoDiagramScreen, titleCourseMenu,
+    saveModal, importModal, askEncounterModal, npcChatModal, oralCoachScreen, questScreen, dinoDiagramScreen, titleCourseMenu,
   };
 })();

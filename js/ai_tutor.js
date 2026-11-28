@@ -1188,6 +1188,85 @@ const AITutor = (() => {
     }
   }
 
+  // ----- Oral Presentation Coach (`Models/OralCoach`) Client API -----
+  async function oralCoachStatus(sinceSeq = 0) {
+    try {
+      const q = encodeURIComponent(String(sinceSeq || 0));
+      const res = await apiFetch(`/api/oral_coach/status?since_seq=${q}`, { method: 'GET' }, 4000);
+      online = true;
+      return res;
+    } catch (e) {
+      return { offline: true, active: false, seq: 0, events: [], error: String((e && e.message) || e) };
+    }
+  }
+
+  async function oralCoachStart(opts = {}) {
+    try {
+      const res = await apiFetch('/api/oral_coach/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          whisper_model: opts.whisper_model || null,
+          language: opts.language || null,
+          course_title: opts.course_title || '',
+          tip_writer_mode: opts.tip_writer_mode || 'auto',
+        }),
+      }, 10000);
+      online = true;
+      return res;
+    } catch (e) {
+      return { offline: true, active: false, error: String((e && e.message) || e) };
+    }
+  }
+
+  async function oralCoachIngest(payload = {}) {
+    try {
+      return await apiFetch('/api/oral_coach/ingest', {
+        method: 'POST',
+        body: JSON.stringify(payload || {}),
+      }, 4500);
+    } catch (e) {
+      return { offline: true, active: false, error: String((e && e.message) || e) };
+    }
+  }
+
+  async function oralCoachMute(seconds = 3.0) {
+    try {
+      return await apiFetch('/api/oral_coach/mute', {
+        method: 'POST',
+        body: JSON.stringify({ seconds }),
+      }, 2500);
+    } catch (e) {
+      return { offline: true };
+    }
+  }
+
+  async function oralCoachStop() {
+    try {
+      return await apiFetch('/api/oral_coach/stop', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }, 5000);
+    } catch (e) {
+      return { offline: true, stopped: false, summary: null };
+    }
+  }
+
+  async function oralCoachLaunchDesktop(opts = {}) {
+    try {
+      const res = await fetch(DEFAULT_API + '/api/oral_coach/launch_desktop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          whisper_model: opts.whisper_model || null,
+          speak: !!opts.speak,
+        }),
+      });
+      return await res.json();
+    } catch (e) {
+      return { offline: true, launched: false, error: String((e && e.message) || e) };
+    }
+  }
+
   return {
     init,
     syncFromPlayerSave,
@@ -1202,6 +1281,12 @@ const AITutor = (() => {
     getVisionPuzzles,
     submitVisionPuzzle,
     submitVisionVQA,
+    oralCoachStatus,
+    oralCoachStart,
+    oralCoachIngest,
+    oralCoachMute,
+    oralCoachStop,
+    oralCoachLaunchDesktop,
     playPodcast,
     stopPodcast,
     isOnline: () => online,

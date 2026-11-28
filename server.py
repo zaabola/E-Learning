@@ -36,6 +36,11 @@ if MODELS_DIR not in sys.path:
     sys.path.insert(0, MODELS_DIR)
 
 from engine.knowledgequest_engine import KnowledgeQuestAIEngine
+try:
+    from OralCoach.oral_coach_service import OralCoachService
+except Exception as _oc_imp_err:
+    print(f"  [OralCoach Warning] Bridge unavailable: {_oc_imp_err}", flush=True)
+    OralCoachService = None
 
 mimetypes.add_type('audio/wav', '.wav')
 mimetypes.add_type('font/ttf', '.ttf')
@@ -63,6 +68,11 @@ class GameServerState:
         )
         self.session = self.engine.create_session(profile=default_profile, course_id=default_course)
         self.ingest_jobs = {}
+        self.oral_coach = (
+            OralCoachService(llm_orchestrator=self.engine.llm_orchestrator)
+            if OralCoachService is not None
+            else None
+        )
 
     def reset_session(self, course_id: str = 'vision_yolo_ocr', profile: str = 'average') -> dict:
         with self.lock:
@@ -163,6 +173,23 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
                 self._send_json({'error': f'Unknown ingest job_id: {job_id}'}, status=404)
                 return
             self._send_json(job)
+            return
+        if route == '/api/oral_coach/status':
+            st = self.server_state
+            if st.oral_coach is None:
+                self._send_json({'active': False, 'error': 'OralCoachService unavailable'}, status=503)
+                return
+            qs = parse_qs(parsed.query)
+            try:
+                since_seq = int((qs.get('since_seq') or ['0'])[0])
+            except ValueError:
+                since_seq = 0
+            out = st.oral_coach.get_status(since_seq=since_seq)
+            if isinstance(out.get('capabilities'), dict):
+                is_loopback = self.client_address[0] in ('127.0.0.1', '::1')
+                is_tunneled = bool(self.headers.get('CF-Connecting-IP') or self.headers.get('X-Forwarded-For'))
+                out['capabilities']['is_local_client'] = bool(is_loopback and not is_tunneled)
+            self._send_json(out)
             return
         super().do_GET()
 
@@ -392,6 +419,70 @@ class KnowledgeQuestHTTPHandler(SimpleHTTPRequestHandler):
             threading.Thread(target=_run_ingest_worker, daemon=True).start()
             self._send_json(st.ingest_jobs[job_id], status=202)
             return
+
+        if route.startswith('/api/oral_coach/'):
+            if st.oral_coach is None:
+                self._send_json({'error': 'OralCoachService unavailable'}, status=503)
+                return
+            if route == '/api/oral_coach/start':
+                out = st.oral_coach.start_session(
+                    whisper_model=body.get('whisper_model') or None,
+                    language=body.get('language') or None,
+                    course_title=str(body.get('course_title') or ''),
+                    tip_writer_mode=str(body.get('tip_writer_mode') or 'auto'),
+                )
+                print(
+                    f"  [ORAL COACH] Session started: {out.get('session_id')} | "
+                    f"Course={out.get('course_title', '')!r}",
+                    flush=True,
+                )
+                self._send_json(out)
+                return
+            if route == '/api/oral_coach/ingest':
+                try:
+                    since_seq = int(body.get('since_seq') or 0)
+                except (TypeError, ValueError):
+                    since_seq = 0
+                try:
+                    sample_rate = int(body.get('sample_rate') or 16000)
+                except (TypeError, ValueError):
+                    sample_rate = 16000
+                out = st.oral_coach.ingest(
+                    frame_b64=body.get('frame_b64') or None,
+                    pcm16_b64=body.get('pcm16_b64') or None,
+                    sample_rate=sample_rate,
+                    transcript=body.get('transcript') or None,
+                    since_seq=since_seq,
+                )
+                self._send_json(out)
+                return
+            if route == '/api/oral_coach/mute':
+                try:
+                    seconds = float(body.get('seconds', 3.0))
+                except (TypeError, ValueError):
+                    seconds = 3.0
+                self._send_json(st.oral_coach.mute(seconds))
+                return
+            if route == '/api/oral_coach/stop':
+                out = st.oral_coach.stop_session()
+                print(f"  [ORAL COACH] Session stopped: {out.get('summary')}", flush=True)
+                self._send_json(out)
+                return
+            if route == '/api/oral_coach/launch_desktop':
+                is_loopback = self.client_address[0] in ('127.0.0.1', '::1')
+                is_tunneled = bool(self.headers.get('CF-Connecting-IP') or self.headers.get('X-Forwarded-For'))
+                if not is_loopback or is_tunneled:
+                    self._send_json(
+                        {'launched': False, 'error': 'Desktop window is only available on localhost.'},
+                        status=403,
+                    )
+                    return
+                out = st.oral_coach.launch_desktop(
+                    whisper_model=body.get('whisper_model') or None,
+                    speak=bool(body.get('speak', False)),
+                )
+                self._send_json(out)
+                return
 
         self._send_json({'error': f'Unknown API route: {route}'}, status=404)
 

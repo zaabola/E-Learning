@@ -190,6 +190,25 @@ const Overworld = (() => {
       await UI.dinoDiagramScreen();
       return;
     }
+    if (Game.player.map === 'bedroom' && ch === 'k' && ty === 1 && (tx === 1 || tx === 2)) {
+      Sfx.select();
+      await UI.say("PLAYER'S PC: Booting ORAL PRESENTATION COACH...");
+      const summary = (UI.oralCoachScreen) ? await UI.oralCoachScreen() : null;
+      if (summary && Number(summary.duration_s || 0) >= 3) {
+        Game.player.flags.oral_sessions = (Game.player.flags.oral_sessions || 0) + 1;
+        Game.player.flags.oral_xp = (Game.player.flags.oral_xp || 0) + Number(summary.xp_earned || 0);
+        await UI.say(
+          `ORAL COACH SESSION COMPLETE!\n` +
+          `Time: ${Number(summary.duration_s || 0).toFixed(0)}s | Coach Lv ${summary.level || 1} | ` +
+          `+${summary.xp_earned || 0} Oral XP | Tips Worked: ${summary.tips_worked || 0}`
+        );
+      }
+      return;
+    }
+    if (Game.player.map === 'bedroom' && ch === 'k' && ty === 4 && (tx === 6 || tx === 7)) {
+      await UI.say("RETRO CONSOLE: Ready for study breaks! Use the PC desk in the top-left corner of your room (Z) to practice with the Oral Presentation Coach.");
+      return;
+    }
     if (ch === 'k' && Game.player.map === 'lab') {
       const cid = Math.max(0, Math.min(4, (tx - 1) % 5));
       const st = (typeof AITutor !== 'undefined') ? AITutor.getStatus() : null;
@@ -664,6 +683,16 @@ const Overworld = (() => {
             ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.round(bx) + 7, Math.round(by) + 7, 2, 2);
           }
         }
+      }
+      if (mapId === 'bedroom') {
+        // Subtle animated power glint on the bedroom PC monitor at tile (1, 1)
+        const pulse = Math.floor(performance.now() / 420) % 2 === 0;
+        const gx = Math.round((1 * TILE + 5 - camX) * 2) / 2;
+        const gy = Math.round((1 * TILE + 1 - camY) * 2) / 2;
+        ctx.fillStyle = pulse ? '#58e8ff' : '#2890c8';
+        ctx.fillRect(gx, gy, 4, 2);
+        ctx.fillStyle = pulse ? '#d8ffff' : '#68c8e8';
+        ctx.fillRect(gx + 1, gy, 2, 1);
       }
     } else {
       const x0 = Math.floor(Math.max(0, camX) / TILE) - 1;

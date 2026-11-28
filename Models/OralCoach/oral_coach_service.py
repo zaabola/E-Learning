@@ -21,13 +21,16 @@ from __future__ import annotations
 import base64
 from collections import deque
 import copy
+import ctypes
 import gc
+import glob
 import importlib.util
 import io
 import json
 import os
 import queue
 import re
+import site
 import subprocess
 import sys
 import threading
@@ -91,6 +94,67 @@ def _release_cuda_cache() -> None:
             torch.cuda.empty_cache()
     except Exception:
         pass
+
+
+def _preload_ctranslate2_cuda_libs() -> bool:
+    """Preload CUDA 12 cublas/cudnn shared libraries into global process symbols on Linux.
+
+    `faster-whisper` (`ctranslate2`) dlopens `libcublas.so.12` without inspecting PyTorch's
+    bundled `nvidia/*/lib` wheels on Kaggle/Colab unless already loaded with RTLD_GLOBAL.
+    """
+    if not sys.platform.startswith("linux"):
+        return True
+
+    rtld_global = getattr(ctypes, "RTLD_GLOBAL", 0)
+    search_roots = []
+    try:
+        search_roots.extend(site.getsitepackages())
+    except Exception:
+        pass
+    search_roots.extend(p for p in sys.path if p)
+
+    lib_dirs = []
+    for root in search_roots:
+        for sub in ("nvidia/cublas/lib", "nvidia/cudnn/lib", "nvidia/cuda_runtime/lib"):
+            cand = os.path.join(root, sub)
+            if os.path.isdir(cand):
+                lib_dirs.append(cand)
+    for pattern in ("/usr/local/cuda*/lib64", "/usr/local/cuda*/targets/*/lib", "/usr/lib/x86_64-linux-gnu"):
+        for cand in glob.glob(pattern):
+            if os.path.isdir(cand):
+                lib_dirs.append(cand)
+
+    # Deduplicate preserving order
+    seen_dirs = set()
+    uniq_dirs = [d for d in lib_dirs if not (d in seen_dirs or seen_dirs.add(d))]
+
+    target_libs = (
+        "libcublasLt.so.12",
+        "libcublas.so.12",
+        "libcudnn.so.9",
+        "libcudnn_ops.so.9",
+        "libcudnn_cnn.so.9",
+    )
+    loaded_cublas = False
+    for lib_name in target_libs:
+        for lib_dir in uniq_dirs:
+            cand = os.path.join(lib_dir, lib_name)
+            if os.path.exists(cand):
+                try:
+                    ctypes.CDLL(cand, mode=rtld_global)
+                    if lib_name == "libcublas.so.12":
+                        loaded_cublas = True
+                    break
+                except OSError:
+                    pass
+
+    if not loaded_cublas:
+        try:
+            ctypes.CDLL("libcublas.so.12", mode=rtld_global)
+            loaded_cublas = True
+        except OSError:
+            loaded_cublas = False
+    return loaded_cublas
 
 
 def _pick_best_cuda_device(min_free_gib: float = 1.8) -> tuple[int | None, float]:
@@ -303,10 +367,14 @@ class _GpuWhisperWorker(threading.Thread):
 
     def run(self):
         cfg, sig = self.v.cfg, self.v.sig
+        can_gpu = (self.gpu_idx is not None) and _preload_ctranslate2_cuda_libs()
+        if self.gpu_idx is not None and not can_gpu:
+            print("[ORAL COACH] libcublas.so.12 unavailable; running Whisper on CPU int8", flush=True)
+
         if self.explicit_model:
             model_size = cfg.whisper_model
         else:
-            model_size = "small" if (self.gpu_idx is not None and self.free_gib >= 3.0) else "base"
+            model_size = "small" if (can_gpu and self.free_gib >= 3.0) else "base"
 
         model = None
         on_gpu = False
@@ -318,13 +386,15 @@ class _GpuWhisperWorker(threading.Thread):
             return
 
         try:
-            model, on_gpu = self._load(WhisperModel, model_size, use_gpu=(self.gpu_idx is not None))
+            model, on_gpu = self._load(WhisperModel, model_size, use_gpu=can_gpu)
         except Exception as exc:
-            if self.gpu_idx is not None:
+            if can_gpu:
                 try:
                     _release_cuda_cache()
-                    model, on_gpu = self._load(WhisperModel, model_size, use_gpu=False)
-                    sig.push("warning", f"Whisper loaded on CPU fallback ({exc})")
+                    cpu_size = cfg.whisper_model if self.explicit_model else "base"
+                    model, on_gpu = self._load(WhisperModel, cpu_size, use_gpu=False)
+                    model_size = cpu_size
+                    print(f"[ORAL COACH] Whisper loaded on CPU int8 fallback ({exc})", flush=True)
                 except Exception as exc2:
                     self.device_label = "disabled"
                     sig.push("warning", f"whisper not loaded ({exc2}); pace and fillers disabled")
@@ -358,8 +428,10 @@ class _GpuWhisperWorker(threading.Thread):
                         try:
                             model = None
                             _release_cuda_cache()
-                            model, on_gpu = self._load(WhisperModel, model_size, use_gpu=False)
-                            sig.push("warning", f"Whisper switched to CPU int8 after CUDA/cuDNN error ({exc})")
+                            cpu_size = cfg.whisper_model if self.explicit_model else "base"
+                            model, on_gpu = self._load(WhisperModel, cpu_size, use_gpu=False)
+                            model_size = cpu_size
+                            print(f"[ORAL COACH] Whisper switched to CPU int8 after CUDA/cuDNN error ({exc})", flush=True)
                             segments, _ = model.transcribe(
                                 audio,
                                 language=cfg.language,
